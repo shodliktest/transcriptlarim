@@ -5,7 +5,203 @@ import base64
 import json
 import os
 from deep_translator import GoogleTranslator
+import streamlit as st
+import streamlit.components.v1 as components
+import whisper
+import base64
+import json
+import os
+from deep_translator import GoogleTranslator
 
+# --- 1. SAHIFA SOZLAMALARI ---
+st.set_page_config(page_title="Shodlik Karaoke Pro", layout="wide")
+
+# --- 2. MUALLIFLIK IMZOSI ---
+SIGNATURE_TEXT = """
+------------------------------
+Shodlik (Otavaliyev_M) Tomondan yaratilgan dasturdan foydalanildi,
+Telegram: @Otavaliyev_M  Instagram: @SHodlik1221
+"""
+
+# --- 3. BACKEND MANTIQI ---
+@st.cache_resource
+def load_model():
+    return whisper.load_model("base")
+
+model = load_model()
+
+def translate_text(text, target_lang):
+    try:
+        return GoogleTranslator(source='auto', target=target_lang).translate(text)
+    except: return text
+
+def get_audio_base64(binary_data):
+    b64 = base64.b64encode(binary_data).decode()
+    return f"data:audio/mp3;base64,{b64}"
+
+# --- 4. SIZNING REACT DIZAYNINGIZ (HTML/JS VERSIYASI) ---
+def render_modern_ui(audio_url, transcript_json):
+    html_code = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://unpkg.com/lucide@latest"></script>
+        <style>
+            @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(-20px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+            @keyframes slideUp {{ from {{ opacity: 0; transform: translateY(40px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+            .animate-fadeIn {{ animation: fadeIn 0.8s ease-out; }}
+            .animate-slideUp {{ animation: slideUp 0.6s ease-out; }}
+            .scrollbar-custom::-webkit-scrollbar {{ width: 8px; }}
+            .scrollbar-custom::-webkit-scrollbar-track {{ background: rgba(255, 255, 255, 0.1); border-radius: 10px; }}
+            .scrollbar-custom::-webkit-scrollbar-thumb {{ background: linear-gradient(to bottom, #ec4899, #a855f7); border-radius: 10px; }}
+        </style>
+    </head>
+    <body class="bg-gradient-to-br from-indigo-950 via-purple-900 to-pink-900 min-h-screen p-4 md:p-8 text-white">
+        <div class="max-w-6xl mx-auto">
+            <div class="text-center mb-12 animate-fadeIn">
+                <div class="flex items-center justify-center gap-3 mb-4">
+                    <div class="relative">
+                        <i data-lucide="mic" class="w-12 h-12 text-pink-400"></i>
+                        <div class="absolute inset-0 bg-pink-400/20 blur-xl rounded-full animate-ping"></div>
+                    </div>
+                    <h1 class="text-5xl md:text-6xl font-black bg-gradient-to-r from-pink-300 via-purple-300 to-indigo-300 bg-clip-text text-transparent">
+                        Audio Karaoke
+                    </h1>
+                </div>
+                <p class="text-purple-200 text-lg md:text-xl font-light">
+                    Audio transkripsiya va sinxronlashgan karaoke tajribasi
+                </p>
+            </div>
+
+            <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 border border-white/20 shadow-2xl animate-slideUp">
+                <audio id="audio-player" src="{audio_url}"></audio>
+                
+                <div class="mb-8 min-h-[120px] flex items-center justify-center text-center">
+                    <p id="active-text" class="text-3xl md:text-5xl font-bold text-white leading-relaxed px-4 transition-all duration-300">
+                        Tayyor bo'lsangiz Play tugmasini bosing...
+                    </p>
+                </div>
+
+                <div class="relative h-3 bg-white/10 rounded-full mb-6 cursor-pointer group overflow-hidden">
+                    <div id="progress-bar" class="absolute h-full bg-gradient-to-r from-pink-500 to-purple-600 rounded-full transition-all duration-100" style="width: 0%"></div>
+                </div>
+
+                <div class="flex items-center justify-between mb-8">
+                    <span id="time-current" class="text-purple-200 font-mono">0:00</span>
+                    <button id="play-btn" class="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white p-6 rounded-full transition-all duration-300 transform hover:scale-110 shadow-xl">
+                        <i data-lucide="play" id="play-icon" class="w-8 h-8"></i>
+                    </button>
+                    <span id="time-duration" class="text-purple-200 font-mono">0:00</span>
+                </div>
+
+                <div id="transcript-list" class="bg-black/20 rounded-2xl p-6 max-h-64 overflow-y-auto scrollbar-custom space-y-2">
+                    </div>
+            </div>
+        </div>
+
+        <script>
+            const audio = document.getElementById('audio-player');
+            const playBtn = document.getElementById('play-btn');
+            const playIcon = document.getElementById('play-icon');
+            const progressBar = document.getElementById('progress-bar');
+            const activeText = document.getElementById('active-text');
+            const transcriptList = document.getElementById('transcript-list');
+            const timeCurrent = document.getElementById('time-current');
+            const timeDuration = document.getElementById('time-duration');
+            
+            const data = {transcript_json};
+
+            // Initialize Lucide Icons
+            lucide.createIcons();
+
+            // Populate Transcript List
+            data.forEach((seg, idx) => {{
+                const div = document.createElement('div');
+                div.id = 'seg-' + idx;
+                div.className = "p-4 rounded-xl cursor-pointer transition-all duration-300 bg-white/5 border border-transparent hover:bg-white/10";
+                div.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <span class="text-purple-300 text-sm font-mono mt-1">${{formatTime(seg.start)}}</span>
+                        <div>
+                            <p class="text-white">${{seg.text}}</p>
+                            ${{seg.translated ? `<p class="text-pink-400/60 text-sm italic mt-1">${{seg.translated}}</p>` : ''}}
+                        </div>
+                    </div>
+                `;
+                div.onclick = () => {{ audio.currentTime = seg.start; audio.play(); }};
+                transcriptList.appendChild(div);
+            }});
+
+            function formatTime(s) {{
+                const mins = Math.floor(s / 60);
+                const secs = Math.floor(s % 60);
+                return mins + ":" + (secs < 10 ? '0' : '') + secs;
+            }}
+
+            playBtn.onclick = () => {{
+                if (audio.paused) {{
+                    audio.play();
+                    playBtn.innerHTML = '<i data-lucide="pause" class="w-8 h-8"></i>';
+                }} else {{
+                    audio.pause();
+                    playBtn.innerHTML = '<i data-lucide="play" class="w-8 h-8"></i>';
+                }}
+                lucide.createIcons();
+            }};
+
+            audio.ontimeupdate = () => {{
+                const cur = audio.currentTime;
+                const dur = audio.duration;
+                progressBar.style.width = (cur / dur * 100) + "%";
+                timeCurrent.innerText = formatTime(cur);
+                timeDuration.innerText = formatTime(dur);
+
+                let activeIdx = data.findIndex(i => cur >= i.start && cur <= i.end);
+                data.forEach((_, i) => {{
+                    const el = document.getElementById('seg-' + i);
+                    if(i === activeIdx) {{
+                        el.className = "p-4 rounded-xl cursor-pointer transition-all duration-300 bg-gradient-to-r from-pink-500/30 to-purple-600/30 border border-pink-400/50 transform scale-105";
+                        activeText.innerText = data[i].text;
+                        el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                    }} else {{
+                        el.className = "p-4 rounded-xl cursor-pointer transition-all duration-300 bg-white/5 border border-transparent hover:bg-white/10";
+                    }}
+                }});
+            }};
+        </script>
+    </body>
+    </html>
+    """
+    components.html(html_code, height=850, scrolling=True)
+
+# --- 5. STREAMLIT ASOSIY QISMI ---
+st.markdown("<style>.stApp { background: transparent; }</style>", unsafe_allow_html=True)
+
+c1, c2 = st.columns(2)
+with c1:
+    uploaded_file = st.file_uploader("Audio yuklang", type=["mp3"])
+with c2:
+    lang = st.selectbox("Tarjima tili", ["original", "uz", "ru", "en"])
+
+if uploaded_file:
+    if st.button("Boshlash"):
+        with st.spinner("AI ishlamoqda..."):
+            with open("temp.mp3", "wb") as f: f.write(uploaded_file.read())
+            result = model.transcribe("temp.mp3")
+            
+            transcript_data = []
+            for s in result['segments']:
+                orig = s['text'].strip()
+                trans = translate_text(orig, lang) if lang != "original" else ""
+                transcript_data.append({{"start": s['start'], "end": s['end'], "text": orig, "translated": trans}})
+            
+            audio_url = get_audio_base64(uploaded_file.getvalue())
+            render_modern_ui(audio_url, json.dumps(transcript_data))
+            
+            # Signatureli fayl yuklash
+            full_txt = "\\n".join([f"[{s['start']:.1f}s] {s['text']}" for s in result['segments']]) + SIGNATURE_TEXT
+            st.download_button("Faylni saqlash", full_txt, "natija.txt")
 # --- 1. SAHIFA SOZLAMALARI ---
 st.set_page_config(page_title="Shodlik Karaoke Pro", layout="wide", initial_sidebar_state="collapsed")
 
@@ -251,3 +447,4 @@ if uploaded_file:
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align: center; color: #9ca3af;'>Shodlik (Otavaliyev_M) &copy; 2026</p>", unsafe_allow_html=True)
+
