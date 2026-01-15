@@ -6,16 +6,16 @@ import os
 import json
 import base64
 import threading
+import pytz
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
 # --- 1. SOZLAMALAR ---
-# ⚠️ DIQQAT: Saytingiz manzilini shu yerga to'g'ri yozing!
 SITE_URL = "https://shodlik1transcript.streamlit.app"
+uz_tz = pytz.timezone('Asia/Tashkent')
 
 try:
     BOT_TOKEN = st.secrets["BOT_TOKEN"]
-    # Firebase shart emas, lekin xato bermasligi uchun qoldiramiz
     FB_API_KEY = st.secrets.get("FB_API_KEY", "")
     PROJECT_ID = st.secrets.get("PROJECT_ID", "")
 except:
@@ -24,15 +24,26 @@ except:
 
 st.set_page_config(page_title="Neon Karaoke Pro", layout="centered", page_icon="🎵")
 
-# --- 2. DIZAYN (QORA & NEON) ---
+# --- 2. DIZAYN (KUCHAYTIRILGAN NEON) ---
 st.markdown("""
 <style>
-    /* Asosiy Fon */
     .stApp { background-color: #000000 !important; color: white !important; }
-    
-    /* Sarlavhalar */
     h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
 
+    /* Neon Selectbox (Til tanlash oynasi) */
+    div[data-baseweb="select"] > div {
+        background-color: #000000 !important;
+        border: 2px solid #00e5ff !important;
+        box-shadow: 0 0 15px #00e5ff;
+        color: #fff !important;
+        border-radius: 10px;
+    }
+    div[role="listbox"] {
+        background-color: #000000 !important;
+        color: #fff !important;
+        border: 1px solid #00e5ff;
+    }
+    
     /* Upload Box */
     [data-testid="stFileUploader"] section { background-color: #111; border: 2px dashed #00e5ff; border-radius: 10px; }
     [data-testid="stFileUploader"] span, div, small { color: white !important; }
@@ -42,12 +53,13 @@ st.markdown("""
     div.stButton > button:first-child {
         background-color: #000; color: #00e5ff; border: 2px solid #00e5ff; 
         border-radius: 10px; padding: 10px; font-size: 18px; font-weight: bold; width: 100%; transition: 0.3s;
+        box-shadow: 0 0 10px #00e5ff;
     }
-    div.stButton > button:first-child:hover { background-color: #00e5ff; color: #000; box-shadow: 0 0 20px #00e5ff; }
+    div.stButton > button:first-child:hover { background-color: #00e5ff; color: #000; box-shadow: 0 0 25px #00e5ff; }
 
     /* Telegram Statusi */
     .tg-status {
-        background-color: #003300; border: 1px solid #00ff00; color: #00ff00;
+        background-color: #001a00; border: 1px solid #00ff00; color: #00ff00;
         padding: 10px; border-radius: 10px; text-align: center; margin-bottom: 20px; font-weight: bold;
     }
     
@@ -101,79 +113,53 @@ def render_neon_player(audio_bytes, transcript_data):
 # --- 4. ASOSIY INTERFEYS ---
 st.title("🎧 KARAOKE & TRANSCRIPT")
 
-# Telegramdan kirganligini tekshirish
 uid_from_url = st.query_params.get("uid", None)
-
 if uid_from_url:
-    st.markdown(f'<div class="tg-status">🟢 Siz Telegram orqali ulandingiz!<br>Natija avtomatik ravishda botga yuboriladi.</div>', unsafe_allow_html=True)
-else:
-    st.info("ℹ️ Saytga shunchaki kirdingiz. Botga ulanish uchun Telegramdagi /start buyrug'idan foydalaning.")
+    st.markdown(f'<div class="tg-status">🟢 Siz Telegram orqali ulandingiz! (ID: {uid_from_url})</div>', unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("MP3 fayl yuklang (Maks: 25MB)", type=['mp3', 'wav', 'ogg'])
+uploaded_file = st.file_uploader("MP3 fayl yuklang", type=['mp3', 'wav', 'ogg'])
+
+# --- NEON MENYU (Til Tanlash) ---
+st.markdown("### 🌐 Tarjima tilini tanlang:")
 lang_options = ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬🇧 Ingliz", "📄 Original"]
-lang_choice = st.selectbox("Tarjima tili", lang_options, index=3)
+lang_choice = st.selectbox("", lang_options, index=3, label_visibility="collapsed")
 
 if st.button("🚀 TAHLILNI BOSHLASH"):
     if uploaded_file:
-        with st.spinner("⚡ Sun'iy intellekt ishlamoqda..."):
-            with open("temp.mp3", "wb") as f: f.write(uploaded_file.getbuffer())
-            model = whisper.load_model("base")
-            result = model.transcribe("temp.mp3")
-            
-            # --- TXT va FORMATLASH ---
-            txt_full = f"TRANSKRIPSIYA\nFayl: {uploaded_file.name}\nSana: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-            player_data = []
-            
-            target_lang = None
-            if "O'zbek" in lang_choice: target_lang = "uz"
-            elif "Rus" in lang_choice: target_lang = "ru"
-            elif "Ingliz" in lang_choice: target_lang = "en"
+        temp_path = f"site_temp_{datetime.now().timestamp()}.mp3"
+        try:
+            with st.spinner("⚡ AI tahlil qilmoqda..."):
+                with open(temp_path, "wb") as f: f.write(uploaded_file.getbuffer())
+                model = whisper.load_model("base")
+                result = model.transcribe(temp_path)
+                
+                txt_full = f"TRANSKRIPSIYA\nFayl: {uploaded_file.name}\nSana: {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n\n"
+                player_data = []
+                
+                target_lang = {"🇺🇿 O'zbek": "uz", "🇷🇺 Rus": "ru", "🇬🇧 Ingliz": "en"}.get(lang_choice)
 
-            for s in result['segments']:
-                start_fmt = f"{int(s['start']//60):02d}:{int(s['start']%60):02d}"
-                end_fmt = f"{int(s['end']//60):02d}:{int(s['end']%60):02d}"
-                time_lip = f"[{start_fmt} - {end_fmt}]" 
+                for s in result['segments']:
+                    start_fmt = f"{int(s['start']//60):02d}:{int(s['start']%60):02d}"
+                    time_lip = f"[{start_fmt} - {int(s['end']//60):02d}:{int(s['end']%60):02d}]"
+                    text = s['text'].strip()
+                    trans = GoogleTranslator(source='auto', target=target_lang).translate(text) if target_lang else None
+                    
+                    player_data.append({"start": s['start'], "end": s['end'], "time": start_fmt, "text": text, "translated": trans})
+                    txt_full += f"{time_lip} {text}\n" + (f"Tarjima: {trans}\n" if trans else "") + "\n"
                 
-                text = s['text'].strip()
-                trans = None
+                txt_full += f"\n---\n© Shodlik (Otavaliyev_M)\nO'zbekiston vaqti: {datetime.now(uz_tz).strftime('%H:%M:%S')}"
                 
-                if target_lang:
-                    try: trans = GoogleTranslator(source='auto', target=target_lang).translate(text)
-                    except: pass
+                render_neon_player(uploaded_file.getvalue(), player_data)
+                st.download_button("📄 TXT Yuklab olish", txt_full, file_name=f"{uploaded_file.name}.txt")
                 
-                player_data.append({
-                    "start": s['start'], 
-                    "end": s['end'], 
-                    "time": start_fmt,
-                    "text": text, 
-                    "translated": trans
-                })
-                
-                txt_full += f"{time_lip} {text}\n"
-                if trans: txt_full += f"Tarjima: {trans}\n"
-                txt_full += "\n"
-            
-            txt_full += "\n---\n© Yaratuvchi: Shodlik (Otavaliyev_M)\n🤖 Bot: @KaraokeProBot"
-            
-            # 1. Pleyerni chizish
-            render_neon_player(uploaded_file.getvalue(), player_data)
-            
-            # 2. Yuklab olish tugmasi
-            st.download_button("📄 TXT Yuklab olish", txt_full, file_name=f"{uploaded_file.name}.txt")
-            
-            # 3. Telegramga yuborish (Agar ID bo'lsa)
-            if uid_from_url:
-                try:
+                if uid_from_url:
                     bot_temp = telebot.TeleBot(BOT_TOKEN)
-                    with open("temp_res.txt", "w", encoding="utf-8") as f: f.write(txt_full)
-                    with open("temp_res.txt", "rb") as f:
-                        bot_temp.send_document(uid_from_url, f, caption=f"✅ **Saytdan natija keldi!**\nFayl: {uploaded_file.name}")
-                    st.toast("Natija Telegramingizga yuborildi!", icon="🚀")
-                    os.remove("temp_res.txt")
-                except Exception as e:
-                    print(f"Xato: {e}")
-            
-            os.remove("temp.mp3")
+                    with open("res.txt", "w", encoding="utf-8") as f: f.write(txt_full)
+                    with open("res.txt", "rb") as f: bot_temp.send_document(uid_from_url, f, caption="✅ Saytdan natija keldi!")
+                    os.remove("res.txt")
+        except Exception as e: st.error(f"Xato: {e}")
+        finally:
+            if os.path.exists(temp_path): os.remove(temp_path) # AVTO-CLEAR
     else:
         st.error("Audio yuklanmadi!")
 
@@ -181,80 +167,45 @@ if st.button("🚀 TAHLILNI BOSHLASH"):
 def background_bot():
     bot = telebot.TeleBot(BOT_TOKEN)
     
-    # ---------------------------------------------
-    # YANGILIK: ASOSIY MENU TUGMALARI (REPLY KEYBOARD)
-    # ---------------------------------------------
     @bot.message_handler(commands=['start'])
     def start_msg(m):
-        # Pastdagi doimiy tugmalar
         menu = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-        btn1 = types.KeyboardButton("🌐 Saytga kirish (Login)")
-        btn2 = types.KeyboardButton("ℹ️ Yordam")
-        menu.add(btn1, btn2)
-        
-        bot.send_message(m.chat.id, 
-                         "👋 **Assalomu alaykum!**\n\n"
-                         "Menga audio yuboring yoki pastdagi tugmalar orqali saytga kiring.", 
-                         reply_markup=menu)
+        menu.add(types.KeyboardButton("🌐 Saytga kirish (Login)"), types.KeyboardButton("ℹ️ Yordam"))
+        bot.send_message(m.chat.id, "👋 Assalomu alaykum! Audio yuboring.", reply_markup=menu)
 
-    # Tugmalar bosilganda ishlaydigan qism
     @bot.message_handler(func=lambda message: message.text == "🌐 Saytga kirish (Login)")
-    def open_site_login(m):
+    def open_site(m):
         link = f"{SITE_URL}/?uid={m.chat.id}"
-        
-        # Linkni Inline Button qilib beramiz (chunki Reply tugmada URL ochilmaydi)
-        inline_markup = types.InlineKeyboardMarkup()
-        inline_markup.add(types.InlineKeyboardButton("🚀 Saytni Ochish", url=link))
-        
-        bot.reply_to(m, "Shaxsiy kabinetingizga kirish uchun bosing:", reply_markup=inline_markup)
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🚀 Saytni Ochish", url=link))
+        bot.reply_to(m, "Shaxsiy havola:", reply_markup=markup)
 
-    @bot.message_handler(func=lambda message: message.text == "ℹ️ Yordam")
-    def help_msg(m):
-        bot.reply_to(m, "1. Menga audio yuboring -> Men TXT qilib beraman.\n2. 'Saytga kirish' ni bosing -> Neon Playerda ko'rasiz.")
-
-    # Audio qabul qilish
     @bot.message_handler(content_types=['audio', 'voice'])
     def handle_docs(m):
+        path = f"b_{m.chat.id}_{datetime.now().timestamp()}.mp3"
         try:
-            bot.reply_to(m, "⏳ Tahlil qilinmoqda... (Biroz kuting)")
-            if m.content_type=='audio': fid=m.audio.file_id; fn=m.audio.file_name or "audio.mp3"
-            else: fid=m.voice.file_id; fn="voice.ogg"
-            
+            bot.reply_to(m, "⏳ Tahlil qilinmoqda...")
+            fid = m.audio.file_id if m.content_type=='audio' else m.voice.file_id
             f_info = bot.get_file(fid); down = bot.download_file(f_info.file_path)
-            path = f"b_{m.chat.id}.mp3"; 
             with open(path, "wb") as f: f.write(down)
             
             model = whisper.load_model("base"); res = model.transcribe(path)
-            
-            txt = f"TRANSKRIPSIYA\nFayl: {fn}\nSana: {datetime.now()}\n\n"
+            txt = f"TRANSKRIPSIYA\nSana: {datetime.now(uz_tz)}\n\n"
             for s in res['segments']:
-                start_f = f"{int(s['start']//60):02d}:{int(s['start']%60):02d}"
-                end_f = f"{int(s['end']//60):02d}:{int(s['end']%60):02d}"
-                txt += f"[{start_f} - {end_f}] {s['text']}\n"
+                txt += f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}] {s['text']}\n"
             
-            txt += "\n---\n© Shodlik (Otavaliyev_M)"
-            
-            # Saytga o'tish tugmasi
-            link = f"{SITE_URL}/?uid={m.chat.id}"
-            mark = types.InlineKeyboardMarkup()
-            mark.add(types.InlineKeyboardButton("🎵 Pleyerda ochish (Sayt)", url=link))
-            
+            txt += "\n---\n© Shodlik"
             with open("res.txt", "w", encoding="utf-8") as f: f.write(txt)
-            with open("res.txt", "rb") as f: 
-                bot.send_document(m.chat.id, f, caption="✅ Marhamat, natija!", reply_markup=mark)
-            
-            os.remove(path); os.remove("res.txt")
-        except Exception as e:
-            bot.send_message(m.chat.id, f"Xato: {e}")
+            with open("res.txt", "rb") as f: bot.send_document(m.chat.id, f, caption="✅ Tayyor!")
+        except Exception as e: bot.send_message(m.chat.id, f"Xato: {e}")
+        finally:
+            if os.path.exists(path): os.remove(path) # AVTO-CLEAR
+            if os.path.exists("res.txt"): os.remove("res.txt")
 
-    try: bot.infinity_polling()
-    except: pass
+    bot.infinity_polling()
 
-# Botni alohida oqimda yurgizish
 if 'bot_active' not in st.session_state:
     st.session_state['bot_active'] = True
-    t = threading.Thread(target=background_bot, daemon=True)
-    t.start()
+    threading.Thread(target=background_bot, daemon=True).start()
 
-# Footer status
-st.markdown('<div style="position:fixed; bottom:0; right:0; padding:5px; background:black; color:lime; font-size:10px;">Bot: Online</div>', unsafe_allow_html=True)
+st.markdown('<div style="position:fixed; bottom:0; right:0; padding:5px; color:lime; font-size:10px;">Bot: Online</div>', unsafe_allow_html=True)
