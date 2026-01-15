@@ -4,245 +4,144 @@ import whisper
 import base64
 import json
 import os
+import requests
 from deep_translator import GoogleTranslator
 
-# --- 1. SAHIFA SOZLAMALARI ---
+# --- 1. FIREBASE SOZLAMALARI ---
+FB_CONFIG = {
+    "apiKey": "AIzaSyD41LIwGEcnVDmsFU73mj12ruoz2s3jdgw",
+    "authDomain": "karoke-pro.firebaseapp.com",
+    "projectId": "karoke-pro"
+}
+
+# --- 2. SAHIFA DIZAYNI VA BRENDINGNI YASHIRISH ---
 st.set_page_config(page_title="Audio Karaoke Pro", layout="centered")
 
-# --- CUSTOM CSS ---
 st.markdown("""
 <style>
+    /* Streamlit menyularini butunlay yashirish */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    div.stDecoration {display:none;}
+
     .stApp {
-        background: linear-gradient(135deg, #4c1d95 0%, #6d28d9 50%, #8b5cf6 100%);
+        background: linear-gradient(135deg, #2e1065 0%, #4c1d95 50%, #701a75 100%);
         font-family: 'Inter', sans-serif;
     }
-    .main-title {
-        color: #ffffff;
-        font-size: 50px;
-        font-weight: 900;
-        text-align: center;
-        margin-bottom: 10px;
-        text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.3);
-    }
     .glass-card {
-        background: rgba(255, 255, 255, 0.12);
-        backdrop-filter: blur(20px);
+        background: rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(16px);
         border-radius: 30px;
-        padding: 30px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-        margin-bottom: 20px;
-    }
-    label p {
-        color: #ffffff !important;
-        font-size: 18px !important;
-        font-weight: 700 !important;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
-    }
-    div[data-baseweb="select"] {
-        background-color: rgba(255, 255, 255, 0.95) !important;
-        border-radius: 12px !important;
-    }
-    div[data-baseweb="select"] * {
-        color: #000000 !important;
-        font-weight: 600 !important;
+        padding: 25px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+        color: white;
     }
     .stButton > button {
         width: 100%;
-        background: linear-gradient(90deg, #f472b6 0%, #a78bfa 100%) !important;
+        background: linear-gradient(90deg, #ec4899 0%, #8b5cf6 100%) !important;
         color: white !important;
         border-radius: 15px !important;
-        font-size: 20px !important;
         font-weight: 800 !important;
-        padding: 12px !important;
         border: none !important;
+        padding: 10px !important;
     }
-    /* Yuklab olish tugmasi uchun alohida dizayn */
-    .download-btn {
-        margin-top: 20px;
-    }
+    div[data-baseweb="select"] { background-color: white !important; border-radius: 10px !important; }
+    div[data-baseweb="select"] * { color: black !important; }
+    label p { color: white !important; font-weight: 600 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. MODEL VA TARJIMA ---
-@st.cache_resource
-def load_model():
-    return whisper.load_model("base")
+# --- 3. FIREBASE AUTH FUNKSIYASI ---
+def firebase_auth(email, password, mode="signInWithPassword"):
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:{mode}?key={FB_CONFIG['apiKey']}"
+    payload = {"email": email, "password": password, "returnSecureToken": True}
+    res = requests.post(url, json=payload)
+    return res.json()
 
-model = load_model()
-
-def translate_text(text, target_lang):
-    try:
-        return GoogleTranslator(source='auto', target=target_lang).translate(text)
-    except: return ""
-
-def get_audio_base64(binary_data):
-    b64 = base64.b64encode(binary_data).decode()
-    return f"data:audio/mp3;base64,{b64}"
-
-# --- 3. KARAOKE RENDER ---
-def render_karaoke_neon(audio_url, transcript_json):
+# --- 4. KARAOKE PLEYER RENDER ---
+def render_karaoke(audio_url, transcript_json):
     html_code = f"""
-    <style>
-        body {{ 
-            margin: 0; 
-            padding: 0; 
-            overflow: hidden; /* Iframe ichidagi ortiqcha skrolni yo'qotadi */
-        }}
-        .karaoke-black-box {{ 
-            background-color: #000000; 
-            font-family: 'Segoe UI', sans-serif; 
-            padding: 25px; 
-            border-radius: 20px;
-            border: 2px solid #333;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }}
-        audio {{ 
-            width: 100%; 
-            filter: invert(100%) hue-rotate(180deg) brightness(1.5); 
-            margin-bottom: 20px;
-        }}
-        #transcript-box {{ 
-            height: 400px; 
-            overflow-y: auto; 
-            padding: 10px; 
-            scroll-behavior: smooth;
-            overscroll-behavior: contain; /* BUTUN EKRAN SURILIB KETMASLIGI UCHUN */
-        }}
-        .word-segment {{ 
-            display: flex;
-            flex-direction: column;
-            margin-bottom: 20px;
-            padding: 10px;
-            cursor: pointer;
-            transition: 0.3s;
-            border-left: 3px solid transparent;
-        }}
-        .original-txt {{
-            font-size: 22px;
-            color: #444;
-            transition: 0.3s;
-        }}
-        .translated-sub {{ 
-            font-size: 15px; 
-            color: #666; 
-            margin-top: 5px;
-            font-style: italic;
-        }}
-        .word-segment.active {{
-            background: rgba(0, 229, 255, 0.05);
-            border-left: 3px solid #00e5ff;
-        }}
-        .word-segment.active .original-txt {{ 
-            color: #00e5ff !important; 
-            text-shadow: 0 0 12px #00e5ff; 
-            font-weight: bold;
-        }}
-        .word-segment.active .translated-sub {{ 
-            color: #999;
-        }}
-        #transcript-box::-webkit-scrollbar {{ width: 5px; }}
-        #transcript-box::-webkit-scrollbar-thumb {{ background: #333; border-radius: 5px; }}
-    </style>
-
-    <div class="karaoke-black-box">
-        <audio id="audio-player" controls src="{audio_url}"></audio>
-        <div id="transcript-box"></div>
+    <div style="background:#000; padding:20px; border-radius:20px; border:1px solid #333; margin-top:20px;">
+        <audio id="aud" controls src="{audio_url}" style="width:100%; filter:invert(1);"></audio>
+        <div id="t-box" style="height:350px; overflow-y:auto; color:#444; font-size:22px; padding:10px; line-height:1.6;"></div>
     </div>
-
     <script>
-        const audio = document.getElementById('audio-player');
-        const box = document.getElementById('transcript-box');
+        const audio = document.getElementById('aud');
+        const box = document.getElementById('t-box');
         const data = {transcript_json};
-
-        data.forEach((item, index) => {{
+        data.forEach((item, i) => {{
             const div = document.createElement('div');
-            div.className = 'word-segment'; div.id = 'seg-' + index;
-            div.innerHTML = `<span class="original-txt">${{item.text}}</span>` + 
-                            (item.translated ? `<span class="translated-sub">${{item.translated}}</span>` : "");
+            div.id = 's-'+i; div.style.marginBottom='15px'; div.style.cursor='pointer';
+            div.innerHTML = `<b>${{item.text}}</b>${{item.translated ? '<br><small style="font-size:14px; color:#666;">'+item.translated+'</small>' : ''}}`;
             div.onclick = () => {{ audio.currentTime = item.start; audio.play(); }};
             box.appendChild(div);
         }});
-
-        let lastIdx = -1;
         audio.ontimeupdate = () => {{
-            const cur = audio.currentTime;
-            let idx = data.findIndex(i => cur >= i.start && cur <= i.end);
-            if (idx !== -1 && idx !== lastIdx) {{
-                if (lastIdx !== -1) {{
-                    const prev = document.getElementById('seg-'+lastIdx);
-                    if(prev) prev.classList.remove('active');
-                }}
-                const el = document.getElementById('seg-'+idx);
-                if(el) {{
-                    el.classList.add('active');
-                    el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                }}
-                lastIdx = idx;
+            let idx = data.findIndex(i => audio.currentTime >= i.start && audio.currentTime <= i.end);
+            data.forEach((_, i) => document.getElementById('s-'+i).style.color = '#444');
+            if(idx !== -1) {{
+                const el = document.getElementById('s-'+idx);
+                el.style.color = '#00e5ff'; el.style.textShadow = '0 0 10px #00e5ff';
+                el.scrollIntoView({{behavior:'smooth', block:'center'}});
             }}
         }};
     </script>
     """
-    components.html(html_code, height=600, scrolling=False)
+    components.html(html_code, height=500)
 
-# --- 4. ASOSIY INTERFEYS ---
-st.markdown('<div class="main-title">Audio Karaoke</div>', unsafe_allow_html=True)
-st.markdown('<p style="text-align:center; color:#ddd;">Transkripsiya va sinxronlashgan karaoke tajribasi</p>', unsafe_allow_html=True)
-
-st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-uploaded_file = st.file_uploader("Audio faylni yuklang", type=["mp3", "wav", "m4a", "flac"])
-
-lang_options = {"Tanlanmagan": "original", "O'zbek": "uz", "Rus": "ru", "Ingliz": "en"}
-target_lang_label = st.selectbox("Tarjima tili", list(lang_options.keys()))
-target_lang_code = lang_options[target_lang_label]
-
-# Boshlash tugmasi
-start_button = st.button("✨ Boshlash")
-
-if uploaded_file and start_button:
-    with open("temp.mp3", "wb") as f:
-        f.write(uploaded_file.getbuffer())
+# --- 5. DASTUR MANTIQI ---
+if 'user' not in st.session_state:
+    st.markdown("<h1 style='color:white; text-align:center;'>Audio Karaoke</h1>", unsafe_allow_html=True)
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    auth_mode = st.radio("Tanlang", ["Kirish", "Ro'yxatdan o'tish"])
+    email = st.text_input("Email")
+    password = st.text_input("Parol", type="password")
     
-    with st.spinner("AI tahlil qilmoqda..."):
-        result = model.transcribe("temp.mp3")
-        
-        transcript_data = []
-        final_txt = "--- TRANSKRIPSIYA HISOBOTI ---\n\n"
-        
-        for s in result['segments']:
-            orig = s['text'].strip()
-            trans = translate_text(orig, target_lang_code) if target_lang_code != "original" else None
-            transcript_data.append({"start": s['start'], "end": s['end'], "text": orig, "translated": trans})
-            
-            final_txt += f"[{s['start']:.1f}s] {orig}\n"
-            if trans: final_txt += f"TARJIMA: {trans}\n"
-            final_txt += "\n"
-        
-        # Mualliflik imzosi
-        signature = "\n------------------------------\nShodlik (Otavaliyev_M) tomonidan yaratildi.\nTG: @Otavaliyev_M"
-        final_txt += signature
-        
-        audio_url = get_audio_base64(uploaded_file.getvalue())
-        
-        # KARAOKE PLEERNI CHIQARISH
-        render_karaoke_neon(audio_url, json.dumps(transcript_data))
-        
-        st.success("Tahlil yakunlandi!")
-        
-        # YUKLAB OLISH TUGMASI (Pleerdan keyin chiqadi)
-        st.download_button(
-            label="📄 Natijani .txt faylda yuklab olish",
-            data=final_txt,
-            file_name="shodlik_karaoke_result.txt",
-            mime="text/plain"
-        )
+    if st.button("Davom etish"):
+        mode = "signInWithPassword" if auth_mode == "Kirish" else "signUp"
+        res = firebase_auth(email, password, mode)
+        if 'localId' in res:
+            st.session_state.user = res
+            st.rerun()
+        else:
+            st.error("Xatolik: Ma'lumotlarni tekshiring (Parol kamida 6 belgidan iborat bo'lishi kerak)")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
+else:
+    # ASOSIY DASTUR
+    st.sidebar.markdown(f"👤 **{st.session_state.user['email']}**")
+    if st.sidebar.button("Chiqish"):
+        del st.session_state.user
+        st.rerun()
 
-# Footer Imzosi
-st.markdown("<div style='color: white; text-align: center; margin-top: 20px; opacity: 0.8;'>Shodlik (Otavaliyev_M) | 2026</div>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color:white; text-align:center;'>Musiqiy Tahlil</h2>", unsafe_allow_html=True)
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    
+    up_file = st.file_uploader("Audio yuklang", type=["mp3", "wav"])
+    lang = st.selectbox("Tarjima tili", ["O'zbek", "Rus", "Ingliz"])
+    lang_code = {"O'zbek":"uz", "Rus":"ru", "Ingliz":"en"}[lang]
 
-# Tozalash
-if os.path.exists("temp.mp3"):
-    try: os.remove("temp.mp3")
-    except: pass
+    if st.button("✨ Tahlil qilish"):
+        if up_file:
+            with st.spinner("AI matnlarni ajratmoqda..."):
+                with open("t.mp3", "wb") as f: f.write(up_file.getbuffer())
+                model = whisper.load_model("base")
+                result = model.transcribe("t.mp3")
+                
+                t_data = []
+                for s in result['segments']:
+                    txt = s['text'].strip()
+                    tr = GoogleTranslator(source='auto', target=lang_code).translate(txt)
+                    t_data.append({"start":s['start'], "end":s['end'], "text":txt, "translated":tr})
+                
+                audio_b64 = f"data:audio/mp3;base64,{base64.b64encode(up_file.getvalue()).decode()}"
+                render_karaoke(audio_b64, json.dumps(t_data))
+        else:
+            st.warning("Fayl yuklanmagan!")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Footer
+st.markdown("<div style='color:white; text-align:center; margin-top:20px; opacity:0.6;'>Shodlik (Otavaliyev_M) | 2026</div>", unsafe_allow_html=True)
+    
