@@ -39,40 +39,12 @@ st.markdown("""
     [data-testid="stFileUploader"] span, div, small { color: white !important; }
     [data-testid="stFileUploader"] button { background-color: #00e5ff; color: black; font-weight: bold; border: none; }
 
-    /* Tugmalar (Download va boshqalar) */
+    /* Boshlash tugmasi */
     div.stButton > button:first-child {
         background-color: #000; color: #00e5ff; border: 2px solid #00e5ff; 
         border-radius: 10px; padding: 10px; font-size: 18px; font-weight: bold; width: 100%; transition: 0.3s;
     }
     div.stButton > button:first-child:hover { background-color: #00e5ff; color: #000; box-shadow: 0 0 20px #00e5ff; }
-
-    /* --- MATNLARNI ANIQLASHTIRISH UCHUN YANGI QISMLAR --- */
-
-    /* Transkript natijasi chiqadigan Text Area (Matn maydoni) */
-    .stTextArea textarea {
-        background-color: #0a0a0a !important;
-        color: #e0e0e0 !important; /* Matn rangi oqishroq */
-        border: 1px solid #00e5ff !important;
-        border-radius: 10px;
-        font-size: 16px !important; /* Matn hajmi kattaroq */
-        line-height: 1.6 !important; /* Qatorlar oralig'i */
-        font-family: 'Courier New', Courier, monospace; /* Matn aniqroq ko'rinishi uchun */
-    }
-
-    /* Oddiy matnlar (Markdown) uchun */
-    [data-testid="stMarkdownContainer"] p {
-        color: #ffffff;
-        font-size: 17px;
-        line-height: 1.5;
-    }
-
-    /* Kod bloklari yoki natija bloklari uchun */
-    code {
-        color: #00e5ff !important;
-        background-color: #111 !important;
-        padding: 2px 6px;
-        border-radius: 4px;
-    }
 
     /* Telegram Statusi */
     .tg-status {
@@ -80,7 +52,7 @@ st.markdown("""
         padding: 10px; border-radius: 10px; text-align: center; margin-bottom: 20px; font-weight: bold;
     }
     
-    /* Neon Player/Box */
+    /* Neon Player */
     .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 20px rgba(0,229,255,0.3); border-radius: 20px; padding: 20px; margin-top: 20px; }
 </style>
 """, unsafe_allow_html=True)
@@ -270,3 +242,4 @@ if 'bot_active' not in st.session_state:
     st.session_state['bot_active'] = True
     t = threading.Thread(target=background_bot, daemon=True)
     t.start()
+
