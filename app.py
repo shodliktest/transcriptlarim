@@ -1,14 +1,21 @@
 import streamlit as st
 import os, json, base64, pytz, time
 from datetime import datetime
-from groq import Groq # Whisper o'rniga yengil Groq ishlatamiz
+from deep_translator import GoogleTranslator
+from groq import Groq
 
-# --- 1. SOZLAMALAR ---
+# --- 1. SOZLAMALAR VA SECRETS ---
 uz_tz = pytz.timezone('Asia/Tashkent')
-GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-client = Groq(api_key=GROQ_API_KEY)
 
-st.set_page_config(page_title="Neon Karaoke", layout="centered")
+# Secrets orqali API kalitni chaqirish
+try:
+    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    client = Groq(api_key=GROQ_API_KEY)
+except Exception:
+    st.error("❌ Secrets bo'limida 'GROQ_API_KEY' topilmadi!")
+    st.stop()
+
+st.set_page_config(page_title="Neon Karaoke Pro", layout="centered")
 
 # --- 2. SIZNING ASLIY NEON DIZAYNINGIZ ---
 st.markdown("""
@@ -16,41 +23,61 @@ st.markdown("""
     #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
     .stDeployButton {display:none;}
     .stApp { background-color: #000000 !important; color: white !important; }
-    
-    div[data-baseweb="select"] > div { background-color: #000 !important; border: 2px solid #00e5ff !important; box-shadow: 0 0 10px #00e5ff; }
+    h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
+
+    /* Neon Selectbox */
+    div[data-baseweb="select"] > div {
+        background-color: #000 !important;
+        border: 2px solid #00e5ff !important;
+        box-shadow: 0 0 10px #00e5ff;
+        border-radius: 10px;
+    }
     div[data-baseweb="select"] span { color: #00e5ff !important; font-weight: bold; }
     
+    /* Neon Tugmalar */
     div.stButton > button, div.stDownloadButton > button {
-        background-color: #000 !important; color: #00e5ff !important; border: 2px solid #00e5ff !important;
-        box-shadow: 0 0 15px #00e5ff; border-radius: 12px; font-weight: bold; width: 100%;
+        background-color: #000 !important;
+        color: #00e5ff !important;
+        border: 2px solid #00e5ff !important;
+        box-shadow: 0 0 15px #00e5ff;
+        border-radius: 12px;
+        font-weight: bold;
+        width: 100%;
+        transition: 0.3s;
+        text-transform: uppercase;
     }
-    div.stButton > button:hover { background-color: #00e5ff !important; color: #000 !important; box-shadow: 0 0 30px #00e5ff; }
+    div.stButton > button:hover { background-color: #00e5ff !important; color: #000 !important; box-shadow: 0 0 35px #00e5ff; }
 
-    [data-testid="stFileUploader"] section { background-color: #000 !important; border: 2px dashed #00e5ff !important; }
-    .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 20px rgba(0,229,255,0.4); border-radius: 20px; padding: 25px; margin-top: 20px; }
+    /* Fayl yuklash oynasi */
+    [data-testid="stFileUploader"] section { background-color: #000 !important; border: 2px dashed #00e5ff !important; border-radius: 15px; }
+    
+    /* Neon Player Box */
+    .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 25px rgba(0,229,255,0.4); border-radius: 20px; padding: 25px; margin-top: 25px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. NEON PLAYER ---
+# --- 3. NEON PLAYER (TIME-LIPS YO'Q, FAQAT MATN) ---
 def render_neon_player(audio_bytes, transcript_data):
     b64 = base64.b64encode(audio_bytes).decode()
+    transcript_json = json.dumps(transcript_data)
     html = f"""
     <div class="neon-box">
-        <h3 style="text-align:center; color:#00e5ff; text-shadow: 0 0 10px #00e5ff;">🎵 NEON KARAOKE PLAYER 🎵</h3>
-        <audio id="player" controls style="width:100%; filter:invert(1) drop-shadow(0 0 5px #00e5ff); margin-bottom:15px;">
+        <h3 style="text-align:center; color:#00e5ff; margin-bottom:15px;">🎵 NEON KARAOKE PLAYER 🎵</h3>
+        <audio id="player" controls style="width:100%; filter:invert(1) drop-shadow(0 0 8px #00e5ff); margin-bottom:15px;">
             <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
-        <div id="lyrics" style="height:400px; overflow-y:auto; scroll-behavior:smooth; padding:10px; border-top:1px solid #333;"></div>
+        <div id="lyrics" style="height:450px; overflow-y:auto; scroll-behavior:smooth; padding:15px; border-top:1px solid #333;"></div>
     </div>
     <script>
         const audio = document.getElementById('player');
         const box = document.getElementById('lyrics');
-        const data = {json.dumps(transcript_data)};
+        const data = {transcript_json};
         
         data.forEach((line, i) => {{
             const div = document.createElement('div');
             div.id = 'L-'+i; div.style.padding='15px'; div.style.borderBottom='1px solid #222'; div.style.cursor='pointer';
-            div.innerHTML = `<div style="font-size:22px; font-weight:bold; color:#444;">${{line.text}}</div>`;
+            div.innerHTML = `<div style="font-size:22px; font-weight:bold; color:#444;">${{line.text}}</div>` + 
+                            (line.translated ? `<div style="font-size:17px; color:#333; margin-top:5px;">${{line.translated}}</div>` : '');
             div.onclick = () => {{ audio.currentTime = line.start; audio.play(); }};
             box.appendChild(div);
         }});
@@ -65,6 +92,7 @@ def render_neon_player(audio_bytes, transcript_data):
                 let el = document.getElementById('L-'+idx);
                 if(el) {{ 
                     el.children[0].style.color='#00e5ff'; 
+                    el.children[0].style.textShadow='0 0 15px #00e5ff';
                     el.style.borderLeft='5px solid #00e5ff';
                     el.scrollIntoView({{behavior:'smooth', block:'center'}});
                 }}
@@ -72,43 +100,57 @@ def render_neon_player(audio_bytes, transcript_data):
         }};
     </script>
     """
-    st.components.v1.html(html, height=600)
+    st.components.v1.html(html, height=620)
 
-# --- 4. ASOSIY QISM ---
+# --- 4. ASOSIY LOGIKA ---
 st.title("🎧 NEON TRANSCRIPT WEB")
 
-up = st.file_uploader("MP3 yuklang", type=['mp3'])
+up = st.file_uploader("MP3 faylni yuklang", type=['mp3', 'wav'])
+lang = st.selectbox("Tarjima tilini tanlang:", ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬🇧 Ingliz", "📄 Original"], index=3)
 
 if st.button("🚀 TAHLILNI BOSHLASH") and up:
     path = f"tmp_{time.time()}.mp3"
     try:
-        with st.spinner("⚡ O'ta tezkor AI tahlil qilmoqda..."):
+        with st.spinner("⚡ Groq API orqali o'ta tezkor tahlil qilinmoqda..."):
+            # Faylni saqlash
             with open(path, "wb") as f: f.write(up.getbuffer())
             
-            # GROQ API orqali Whisper (Base modeldan ham aniqroq va 100x tezroq)
+            # Groq API call (Whisper-Large-V3-Turbo)
             with open(path, "rb") as file:
                 transcription = client.audio.transcriptions.create(
                     file=(path, file.read()),
-                    model="whisper-large-v3-turbo", # Eng kuchli va tezkor model
+                    model="whisper-large-v3-turbo",
                     response_format="verbose_json",
                 )
             
             p_data = []
-            txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n\n"
+            txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
+            t_code = {"🇺🇿 O'zbek":"uz","🇷🇺 Rus":"ru","🇬🇧 Ingliz":"en"}.get(lang)
 
             for s in transcription.segments:
-                text = s['text'].strip()
-                p_data.append({"start": s['start'], "end": s['end'], "text": text})
-                txt_out += f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}] {text}\n"
+                orig_text = s['text'].strip()
+                # Tarjima jarayoni
+                tr = GoogleTranslator(source='auto', target=t_code).translate(orig_text) if t_code else None
+                
+                # Player uchun ma'lumotlar (Time-lips-siz UI uchun)
+                p_data.append({"start": s['start'], "end": s['end'], "text": orig_text, "translated": tr})
+                
+                # TXT fayl uchun vaqtlar bilan saqlash
+                tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
+                txt_out += f"{tm} {orig_text}\n" + (f"Tarjima: {tr}\n" if tr else "") + "\n"
 
-            txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M)"
+            # PECHAT / IMZO
+            txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M) | 🤖 Neon Pro Web | ⏰ {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
             
+            # NATIJANI CHIQARISH
             render_neon_player(up.getvalue(), p_data)
-            st.download_button("📄 TXT YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
+            st.download_button("📄 TXT FAYLNI YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
 
     except Exception as e:
-        st.error(f"Xatolik: API kalitni tekshiring! {e}")
+        st.error(f"Xatolik yuz berdi: {e}")
     finally:
-        if os.path.exists(path): os.remove(path)
+        # AUTO-CLEAR: Vaqtinchalik faylni darhol o'chirish
+        if os.path.exists(path):
+            os.remove(path)
 
 st.caption("© Shodlik (Otavaliyev_M)")
