@@ -27,24 +27,7 @@ def clear_ram():
 
 # --- 3. DIZAYN (QORA & NEON) ---
 st.markdown("""
-<style>
-    .stApp { background-color: #000000 !important; color: white !important; }
-    h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff; }
-    
-    /* Upload Box */
-    [data-testid="stFileUploader"] section { background-color: #111; border: 2px dashed #00e5ff; }
-    [data-testid="stFileUploader"] span, div, small { color: white !important; }
-    
-    /* Buttons */
-    div.stButton > button:first-child {
-        background-color: #000; color: #00e5ff; border: 2px solid #00e5ff; 
-        border-radius: 10px; font-weight: bold; width: 100%; transition: 0.3s;
-    }
-    div.stButton > button:first-child:hover { background-color: #00e5ff; color: #000; box-shadow: 0 0 15px #00e5ff; }
-    
-    /* Player */
-    .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 15px rgba(0,229,255,0.3); border-radius: 20px; padding: 20px; margin-top: 20px; }
-</style>
+#00ff00
 """, unsafe_allow_html=True)
 
 # --- 4. NEON PLAYER FUNKSIYASI ---
@@ -232,3 +215,4 @@ if 'bot_active' not in st.session_state:
     st.session_state['bot_active'] = True
     t = threading.Thread(target=background_bot, daemon=True)
     t.start()
+
