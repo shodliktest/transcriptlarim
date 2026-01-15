@@ -93,7 +93,7 @@ def render_neon_player(audio_bytes, transcript_data):
     transcript_json = json.dumps(transcript_data)
     html = f"""
     <div class="neon-box">
-        <h3 style="text-align:center; color:#00e5ff; text-shadow: 0 0 10px #00e5ff;">🎵 NEON KARAOKE PLAYER 🎵</h3>
+        <h3 style="text-align:center; color:#00e5ff; text-shadow: 0 0 10px #00e5ff;">🎵 NEON PLAYER 🎵</h3>
         <audio id="player" controls style="width:100%; filter:invert(1) drop-shadow(0 0 8px #00e5ff); margin-bottom:15px;">
             <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
@@ -134,7 +134,7 @@ def render_neon_player(audio_bytes, transcript_data):
     st.components.v1.html(html, height=620)
 
 # --- 4. ASOSIY LOGIKA ---
-st.title("🎧 NEON TRANSCRIPT WEB")
+st.title("🎧NEON TRANSCRIPT")
 
 st.markdown('<p class="limit-text">⚠️ CHEKLOV: Maksimal 25MB | Faqat MP3, WAV</p>', unsafe_allow_html=True)
 
@@ -203,3 +203,4 @@ if st.button("🚀 TAHLILNI BOSHLASH") and up:
         if os.path.exists(path): os.remove(path)
 
 st.caption("© Shodlik (Otavaliyev_M)")
+
