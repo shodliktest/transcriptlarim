@@ -1,5 +1,5 @@
 import streamlit as st
-import os, json, base64, pytz, time
+import os, json, base64, pytz, time, re
 from datetime import datetime
 from deep_translator import GoogleTranslator
 from groq import Groq
@@ -7,16 +7,22 @@ from groq import Groq
 # --- 1. SOZLAMALAR ---
 uz_tz = pytz.timezone('Asia/Tashkent')
 
-try:
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    client = Groq(api_key=GROQ_API_KEY)
-except Exception:
+@st.cache_resource
+def get_groq_client():
+    try:
+        return Groq(api_key=st.secrets["GROQ_API_KEY"])
+    except Exception:
+        return None
+
+client = get_groq_client()
+
+if client is None:
     st.error("❌ Secrets bo'limida 'GROQ_API_KEY' topilmadi!")
     st.stop()
 
 st.set_page_config(page_title="Neon Karaoke Pro", layout="centered")
 
-# --- 2. DIZAYN (NEON & MINIMAL) ---
+# --- 2. DIZAYN (NEON) ---
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
@@ -24,38 +30,27 @@ st.markdown("""
     .stApp { background-color: #000000 !important; color: white !important; }
     h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
 
-    /* Neon Progress Bar */
     .stProgress > div > div > div > div {
         background-image: linear-gradient(to right, #00e5ff, #00ff88) !important;
-        box-shadow: 0 0 20px #00e5ff;
-        border-radius: 10px;
+        box-shadow: 0 0 20px #00e5ff; border-radius: 10px;
     }
-    .stProgress { height: 12px !important; }
 
-    /* Fayl yuklash (Ikonkasiz) */
     [data-testid="stFileUploader"] section { 
-        background-color: #000 !important; 
-        border: 3px dashed #00e5ff !important; 
-        border-radius: 20px;
-        padding: 50px 20px !important;
+        background-color: #000 !important; border: 3px dashed #00e5ff !important; 
+        border-radius: 20px; padding: 50px 20px !important;
     }
     [data-testid="stFileUploader"] section svg { display: none !important; }
     [data-testid="stFileUploader"] section div div { font-size: 0px !important; }
 
     [data-testid="stFileUploader"] button {
-         background-color: #000 !important;
-         color: #00e5ff !important;
-         border: 2px solid #00e5ff !important;
-         box-shadow: 0 0 15px #00e5ff;
-         border-radius: 10px;
-         font-weight: bold;
-         padding: 12px 25px !important;
+         background-color: #000 !important; color: #00e5ff !important;
+         border: 2px solid #00e5ff !important; box-shadow: 0 0 15px #00e5ff;
+         border-radius: 10px; font-weight: bold; padding: 12px 25px !important;
          display: block !important; margin: 0 auto !important;
     }
     [data-testid="stFileUploader"] button span::before { content: "FAYL TANLASH UCHUN BOSING"; visibility: visible; font-size: 16px; }
     [data-testid="stFileUploader"] button span { visibility: hidden; }
 
-    /* Boshqa neon elementlar */
     div.stButton > button, div.stDownloadButton > button {
         background-color: #000 !important; color: #00e5ff !important; border: 2px solid #00e5ff !important;
         box-shadow: 0 0 15px #00e5ff; border-radius: 12px; font-weight: bold; width: 100%; text-transform: uppercase;
@@ -116,19 +111,15 @@ lang = st.selectbox("Tarjima tili:", ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬�
 
 if st.button("🚀 TAHLILNI BOSHLASH") and up:
     path = f"t_{time.time()}.mp3"
-    
-    # --- PROGRES SLOTINI YARATISH ---
     progress_placeholder = st.empty() 
 
     try:
         with progress_placeholder.container():
             st.markdown("<p style='color:#00e5ff; text-align:center; font-weight:bold;'>⚡ Jarayon ketmoqda...</p>", unsafe_allow_html=True)
             bar = st.progress(0)
-            
             with open(path, "wb") as f: f.write(up.getbuffer())
             bar.progress(20)
             
-            # Groq API Call
             with open(path, "rb") as file:
                 trans = client.audio.transcriptions.create(
                     file=(path, file.read()),
@@ -137,19 +128,23 @@ if st.button("🚀 TAHLILNI BOSHLASH") and up:
                 )
             bar.progress(80)
             
-            p_data = []
-            txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
+            p_data = []; txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
             t_code = {"🇺🇿 O'zbek":"uz","🇷🇺 Rus":"ru","🇬🇧 Ingliz":"en"}.get(lang)
 
             for s in trans.segments:
-                text = s['text'].strip()
-                tr = GoogleTranslator(source='auto', target=t_code).translate(text) if t_code else None
-                p_data.append({"start": s['start'], "end": s['end'], "text": text, "translated": tr})
+                raw_text = s['text'].strip()
+                # NUQTADAN KEYIN YANGI QATORGA TUSHIRISH MANTIQI:
+                # Regex orqali . ! ? dan keyin yangi qator belgisi qo'shamiz
+                sentences = re.split(r'(?<=[.!?])\s+', raw_text)
                 
-                tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
-                txt_out += f"{tm} {text}\n" + (f"T: {tr}\n" if tr else "") + "\n"
+                for sentence in sentences:
+                    if not sentence: continue
+                    tr = GoogleTranslator(source='auto', target=t_code).translate(sentence) if t_code else None
+                    p_data.append({"start": s['start'], "end": s['end'], "text": sentence, "translated": tr})
+                    
+                    tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
+                    txt_out += f"{tm} {sentence}\n" + (f"T: {tr}\n" if tr else "") + "\n"
             
-            # --- PECHAT TIZIMI ---
             uz_now = datetime.now(uz_tz).strftime('%H:%M:%S')
             pechat = f"\n---\n👤 Shodlik (Otavaliyev_M) | ⏰ {uz_now} (UZB)\n🤖 Neon Pro Web Server"
             txt_out += pechat
@@ -158,13 +153,9 @@ if st.button("🚀 TAHLILNI BOSHLASH") and up:
             st.markdown("<p style='color:#00ff88; text-align:center;'>✅ Tayyor!</p>", unsafe_allow_html=True)
             time.sleep(1)
 
-        # --- PROGRESSNI BUTUNLAY YO'Q QILISH ---
         progress_placeholder.empty()
-
-        # NATIJANI CHIQARISH
         render_neon_player(up.getvalue(), p_data)
         
-        # Saytda ham imzoni ko'rsatish
         st.markdown(f"""
             <div style="text-align:right; color:#00e5ff; font-size:12px; margin-top:10px; opacity:0.7;">
                 {pechat.replace('---\\n', '').replace('\\n', '<br>')}
