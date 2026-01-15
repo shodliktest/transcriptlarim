@@ -27,7 +27,62 @@ def clear_ram():
 
 # --- 3. DIZAYN (QORA & NEON) ---
 st.markdown("""
-#00ff00
+<style>
+    /* Asosiy Fon */
+    .stApp { background-color: #000000 !important; color: white !important; }
+    
+    /* Sarlavhalar */
+    h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
+
+    /* Upload Box */
+    [data-testid="stFileUploader"] section { background-color: #111; border: 2px dashed #00e5ff; border-radius: 10px; }
+    [data-testid="stFileUploader"] span, div, small { color: white !important; }
+    [data-testid="stFileUploader"] button { background-color: #00e5ff; color: black; font-weight: bold; border: none; }
+
+    /* Tugmalar (Download va boshqalar) */
+    div.stButton > button:first-child {
+        background-color: #000; color: #00e5ff; border: 2px solid #00e5ff; 
+        border-radius: 10px; padding: 10px; font-size: 18px; font-weight: bold; width: 100%; transition: 0.3s;
+    }
+    div.stButton > button:first-child:hover { background-color: #00e5ff; color: #000; box-shadow: 0 0 20px #00e5ff; }
+
+    /* --- MATNLARNI ANIQLASHTIRISH UCHUN YANGI QISMLAR --- */
+
+    /* Transkript natijasi chiqadigan Text Area (Matn maydoni) */
+    .stTextArea textarea {
+        background-color: #0a0a0a !important;
+        color: #e0e0e0 !important; /* Matn rangi oqishroq */
+        border: 1px solid #00e5ff !important;
+        border-radius: 10px;
+        font-size: 16px !important; /* Matn hajmi kattaroq */
+        line-height: 1.6 !important; /* Qatorlar oralig'i */
+        font-family: 'Courier New', Courier, monospace; /* Matn aniqroq ko'rinishi uchun */
+    }
+
+    /* Oddiy matnlar (Markdown) uchun */
+    [data-testid="stMarkdownContainer"] p {
+        color: #ffffff;
+        font-size: 17px;
+        line-height: 1.5;
+    }
+
+    /* Kod bloklari yoki natija bloklari uchun */
+    code {
+        color: #00e5ff !important;
+        background-color: #111 !important;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    /* Telegram Statusi */
+    .tg-status {
+        background-color: #003300; border: 1px solid #00ff00; color: #00ff00;
+        padding: 10px; border-radius: 10px; text-align: center; margin-bottom: 20px; font-weight: bold;
+    }
+    
+    /* Neon Player/Box */
+    .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 20px rgba(0,229,255,0.3); border-radius: 20px; padding: 20px; margin-top: 20px; }
+</style>
 """, unsafe_allow_html=True)
 
 # --- 4. NEON PLAYER FUNKSIYASI ---
@@ -215,4 +270,3 @@ if 'bot_active' not in st.session_state:
     st.session_state['bot_active'] = True
     t = threading.Thread(target=background_bot, daemon=True)
     t.start()
-
