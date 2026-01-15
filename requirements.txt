@@ -1,5 +1,7 @@
 streamlit
 openai-whisper
-torch
+requests
 deep-translator
-setuptools
+pyTelegramBotAPI
+ffmpeg-python
+
