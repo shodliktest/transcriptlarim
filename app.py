@@ -1,89 +1,97 @@
 import streamlit as st
-import telebot
-from telebot import types
 import whisper
-import os
-import json
-import base64
-import threading
-import pytz
+import os, json, base64, pytz, threading, time
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
-# --- 1. SOZLAMALAR ---
-SITE_URL = "https://shodlik1transcript.streamlit.app"
+# --- 1. GLOBAL SOZLAMALAR ---
 uz_tz = pytz.timezone('Asia/Tashkent')
 
-try:
-    BOT_TOKEN = st.secrets["BOT_TOKEN"]
-    FB_API_KEY = st.secrets.get("FB_API_KEY", "")
-    PROJECT_ID = st.secrets.get("PROJECT_ID", "")
-except:
-    st.error("❌ Secrets kalitlari topilmadi!")
-    st.stop()
+# Modelni keshda saqlash (RAMni tejash uchun)
+@st.cache_resource
+def load_model():
+    return whisper.load_model("tiny")
 
-st.set_page_config(page_title="Neon Karaoke Pro", layout="centered", page_icon="🎵")
+model = load_model()
 
-# --- 2. DIZAYN VA STREAMLITNI YASHIRISH (CSS) ---
+# Navbatni boshqarish uchun lock
+if 'queue_lock' not in st.session_state:
+    st.session_state.queue_lock = threading.Lock()
+
+# Server darajasidagi umumiy navbat hisoblagichi
+@st.cache_resource
+def get_queue_manager():
+    return {"count": 0}
+
+queue_manager = get_queue_manager()
+
+st.set_page_config(page_title="Neon Karaoke Player Pro", layout="centered")
+
+# --- 2. DIZAYN (STREAMLITNI YASHIRISH VA NEON EFFEKT) ---
 st.markdown("""
 <style>
-    /* 1. STREAMLIT ELEMENTLARINI BUTUNLAY YASHIRISH */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
+    /* Streamlit elementlarini butunlay yashirish */
+    #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
     .stDeployButton {display:none;}
     [data-testid="stViewerBadge"] {display: none;}
-    
-    /* 2. ASOSIY FON VA NEON DIZAYN */
+
+    /* Asosiy Neon dizayn */
     .stApp { background-color: #000000 !important; color: white !important; }
     h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
 
-    /* Neon Selectbox */
-    div[data-baseweb="select"] > div {
-        background-color: #000000 !important;
-        border: 2px solid #00e5ff !important;
-        box-shadow: 0 0 15px #00e5ff;
-        border-radius: 10px;
+    /* Neon Navbat Box */
+    .queue-box {
+        border: 2px solid #00e5ff;
+        border-radius: 15px;
+        padding: 20px;
+        text-align: center;
+        background: rgba(0, 229, 255, 0.05);
+        box-shadow: 0 0 20px #00e5ff;
+        margin-bottom: 25px;
+        animation: neonPulse 2s infinite;
     }
-    div[data-baseweb="select"] span { color: #00e5ff !important; text-shadow: 0 0 8px #00e5ff; font-weight: bold; }
-    div[role="listbox"] { background-color: #000 !important; border: 1px solid #00e5ff !important; }
+    @keyframes neonPulse {
+        0% { box-shadow: 0 0 10px #00e5ff; }
+        50% { box-shadow: 0 0 25px #00e5ff; }
+        100% { box-shadow: 0 0 10px #00e5ff; }
+    }
+    .neon-text { color: #00e5ff; text-shadow: 0 0 10px #00e5ff; font-weight: bold; font-size: 22px; }
 
-    /* Fayl yuklash qismi */
-    [data-testid="stFileUploader"] section {
-        background-color: #000 !important;
-        border: 2px dashed #00e5ff !important;
-        border-radius: 15px; padding: 20px;
-    }
-    [data-testid="stFileUploader"] span, [data-testid="stFileUploader"] div, [data-testid="stFileUploader"] small {
-        color: #00e5ff !important; text-shadow: 0 0 5px #00e5ff;
-    }
-
-    /* Tugmalar dizayni */
+    /* Neon Selectbox va Inputlar */
+    div[data-baseweb="select"] > div { background-color: #000 !important; border: 2px solid #00e5ff !important; box-shadow: 0 0 10px #00e5ff; }
+    div[data-baseweb="select"] span { color: #00e5ff !important; font-weight: bold; }
+    
+    /* Neon Tugmalar */
     div.stButton > button, div.stDownloadButton > button {
-        background-color: #000 !important;
-        color: #00e5ff !important;
-        border: 2px solid #00e5ff !important;
-        border-radius: 12px; padding: 10px 25px;
-        font-size: 18px !important; font-weight: bold; width: 100%;
-        box-shadow: 0 0 15px #00e5ff; transition: 0.3s;
+        background-color: #000 !important; color: #00e5ff !important; border: 2px solid #00e5ff !important;
+        box-shadow: 0 0 15px #00e5ff; transition: 0.3s; width: 100%; font-weight: bold; height: 50px;
         text-transform: uppercase;
     }
-    div.stButton > button:hover, div.stDownloadButton > button:hover {
-        background-color: #00e5ff !important; color: #000 !important; box-shadow: 0 0 35px #00e5ff;
-    }
+    div.stButton > button:hover { background-color: #00e5ff !important; color: #000 !important; box-shadow: 0 0 35px #00e5ff; }
 
-    /* Player va Status */
-    .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 25px rgba(0,229,255,0.4); border-radius: 20px; padding: 25px; margin-top: 25px; }
-    .tg-status { background-color: #001a00; border: 1px solid #00ff00; color: #00ff00; padding: 10px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+    /* Fayl yuklash oynasi */
+    [data-testid="stFileUploader"] section { background-color: #000; border: 2px dashed #00e5ff !important; border-radius: 12px; }
+    .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 20px rgba(0,229,255,0.3); border-radius: 20px; padding: 25px; margin-top: 25px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. NEON PLAYER CHIZISH (FAYLDAGI TIME LIPS O'CHIRILDI) ---
-def render_neon_player(audio_bytes, transcript_data):
+# --- 3. NEON PLAYER VA LOCALSTORAGE ---
+def render_neon_player(audio_bytes, transcript_data, save_now=False):
     b64 = base64.b64encode(audio_bytes).decode()
+    transcript_json = json.dumps(transcript_data)
+    
+    save_script = f"""
+    <script>
+        if ({str(save_now).lower()}) {{
+            localStorage.setItem('last_karaoke_data', `{transcript_json}`);
+        }}
+    </script>
+    """
+
     html = f"""
+    {save_script}
     <div class="neon-box">
-        <h3 style="text-align:center; color:#00e5ff; margin-bottom:15px;">🎵 NEON PLEYER 🎵</h3>
+        <h3 style="text-align:center; color:#00e5ff; margin-bottom:15px;">🎵 NEON KARAOKE PLAYER 🎵</h3>
         <audio id="player" controls style="width:100%; filter:invert(1) drop-shadow(0 0 5px #00e5ff); margin-bottom:15px;">
             <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
@@ -92,131 +100,110 @@ def render_neon_player(audio_bytes, transcript_data):
     <script>
         const audio = document.getElementById('player');
         const box = document.getElementById('lyrics');
-        const data = {json.dumps(transcript_data)};
+        const data = {transcript_json};
         
         data.forEach((line, i) => {{
             const div = document.createElement('div');
-            div.id = 'L-'+i;
-            div.style.padding='15px'; div.style.borderBottom='1px solid #333'; div.style.cursor='pointer';
-            // TIME LIPS OLIB TASHLANDI, FAQAT MATN QOLDI:
-            div.innerHTML = `<div style="font-size:20px; font-weight:bold; color:#777;">${{line.text}}</div>` + (line.translated ? `<div style="font-size:16px; color:#555;">${{line.translated}}</div>` : '');
+            div.id = 'L-'+i; div.style.padding='15px'; div.style.borderBottom='1px solid #333'; div.style.cursor='pointer';
+            // PLAYERDA TIME LIPS KO'RSATILMAYDI
+            div.innerHTML = `<div style="font-size:22px; font-weight:bold; color:#555;">${{line.text}}</div>` + 
+                            (line.translated ? `<div style="font-size:17px; color:#444;">${{line.translated}}</div>` : '');
             div.onclick = () => {{ audio.currentTime = line.start; audio.play(); }};
             box.appendChild(div);
         }});
+        
         audio.ontimeupdate = () => {{
             let idx = data.findIndex(x => audio.currentTime >= x.start && audio.currentTime < x.end);
             data.forEach((_, i) => {{ 
                 let el = document.getElementById('L-'+i);
-                if(el){{ el.children[0].style.color='#777'; el.style.borderLeft='none'; }}
+                if(el){{ el.children[0].style.color='#555'; el.style.borderLeft='none'; }}
             }});
             if(idx!==-1){{
                 let el = document.getElementById('L-'+idx);
                 if(el){{ 
                     el.children[0].style.color='#00e5ff'; el.children[0].style.textShadow='0 0 15px #00e5ff';
-                    el.style.borderLeft='4px solid #00e5ff'; el.scrollIntoView({{behavior:'smooth', block:'center'}});
+                    el.style.borderLeft='5px solid #00e5ff'; el.scrollIntoView({{behavior:'smooth', block:'center'}});
                 }}
             }}
         }};
     </script>
     """
-    st.components.v1.html(html, height=600)
+    st.components.v1.html(html, height=620)
 
-# --- 4. ASOSIY INTERFEYS ---
-st.title("🎧 KARAOKE & TRANSCRIPT")
+# --- 4. ASOSIY LOGIKA ---
+st.title("🎧 NEON TRANSCRIPT WEB")
 
-uid_from_url = st.query_params.get("uid", None)
-if uid_from_url:
-    st.markdown(f'<div class="tg-status">🟢 Siz Telegram orqali ulandingiz! (ID: {uid_from_url})</div>', unsafe_allow_html=True)
+# Navbat holatini ko'rsatish
+current_q = queue_manager["count"]
+if current_q > 0:
+    st.markdown(f"""
+    <div class="queue-box">
+        <div class="neon-text">NAVIBATDA: {current_q} TA FOYDALANUVCHI</div>
+        <div class="neon-text" style="font-size:30px; margin-top:10px;">⏳ TAXMINIY VAQT: ~{current_q * 1} MINUT</div>
+        <div style="color:#aaa; margin-top:5px;">Server band, iltimos navbatingizni kuting...</div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown('<div style="text-align:center; color:lime; margin-bottom:20px;">🟢 Server bo\'sh. Tahlilni hozir boshlashingiz mumkin!</div>', unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("MP3 fayl yuklang", type=['mp3', 'wav', 'ogg'])
-
-st.markdown("### 🌐 Tarjima tilini tanlang:")
-lang_options = ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬🇧 Ingliz", "📄 Original"]
-lang_choice = st.selectbox("", lang_options, index=3, label_visibility="collapsed")
+uploaded_file = st.file_uploader("Faqat MP3 yoki WAV yuklang", type=['mp3', 'wav'])
+lang_choice = st.selectbox("Tarjima tilini tanlang:", ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬🇧 Ingliz", "📄 Original"], index=3)
 
 if st.button("🚀 TAHLILNI BOSHLASH"):
     if uploaded_file:
-        temp_path = f"site_temp_{datetime.now().timestamp()}.mp3"
+        queue_manager["count"] += 1
         try:
-            with st.spinner("⚡ AI tahlil qilmoqda..."):
-                with open(temp_path, "wb") as f: f.write(uploaded_file.getbuffer())
-                model = whisper.load_model("base")
-                result = model.transcribe(temp_path)
-                
-                # TXT FAYL (TIME LIPS SAQLAB QOLINDI)
-                txt_full = f"TRANSKRIPSIYA\nFayl: {uploaded_file.name}\nSana: {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n\n"
-                player_data = []
-                target_lang = {"🇺🇿 O'zbek": "uz", "🇷🇺 Rus": "ru", "🇬🇧 Ingliz": "en"}.get(lang_choice)
-
-                for s in result['segments']:
-                    start_fmt = f"{int(s['start']//60):02d}:{int(s['start']%60):02d}"
-                    time_lip = f"[{start_fmt} - {int(s['end']//60):02d}:{int(s['end']%60):02d}]"
-                    text = s['text'].strip()
-                    trans = GoogleTranslator(source='auto', target=target_lang).translate(text) if target_lang else None
+            with st.spinner("⏳ Navbatingiz keldi! AI tahlil qilmoqda..."):
+                # Global Lock: Serverda faqat bir kishi tahlil qilishi uchun
+                with st.session_state.queue_lock:
+                    temp_path = f"web_tmp_{time.time()}.mp3"
+                    with open(temp_path, "wb") as f: f.write(uploaded_file.getbuffer())
                     
-                    player_data.append({"start": s['start'], "end": s['end'], "time": start_fmt, "text": text, "translated": trans})
-                    txt_full += f"{time_lip} {text}\n" + (f"Tarjima: {trans}\n" if trans else "") + "\n"
-                
-                txt_full += f"\n---\n© Shodlik (Otavaliyev_M)\nO'zbekiston vaqti: {datetime.now(uz_tz).strftime('%H:%M:%S')}"
-                
-                render_neon_player(uploaded_file.getvalue(), player_data)
-                st.download_button("📄 TXT Yuklab olish", txt_full, file_name=f"{uploaded_file.name}.txt")
-                
-                if uid_from_url:
-                    bot_temp = telebot.TeleBot(BOT_TOKEN)
-                    with open("res.txt", "w", encoding="utf-8") as f: f.write(txt_full)
-                    with open("res.txt", "rb") as f: bot_temp.send_document(uid_from_url, f, caption="✅ Saytdan natija keldi!")
-                    os.remove("res.txt")
-        except Exception as e: st.error(f"Xato: {e}")
+                    # Whisper Tahlil
+                    result = model.transcribe(temp_path)
+                    
+                    p_data = []
+                    # TXT fayl uchun pechat va vaqtli sarlavha
+                    txt_out = f"📄 TRANSKRIPSIYA: {uploaded_file.name}\n"
+                    txt_out += f"📅 Sana: {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n"
+                    txt_out += "------------------------------------------\n\n"
+                    
+                    t_code = {"🇺🇿 O'zbek": "uz", "🇷🇺 Rus": "ru", "🇬🇧 Ingliz": "en"}.get(lang_choice)
+
+                    for s in result['segments']:
+                        text = s['text'].strip()
+                        trans = GoogleTranslator(source='auto', target=t_code).translate(text) if t_code else None
+                        
+                        # Player uchun (Vaqtsiz)
+                        p_data.append({"start": s['start'], "end": s['end'], "text": text, "translated": trans})
+                        
+                        # TXT fayl uchun (Vaqtli [00:00 - 00:05])
+                        start_f = f"{int(s['start']//60):02d}:{int(s['start']%60):02d}"
+                        end_f = f"{int(s['end']//60):02d}:{int(s['end']%60):02d}"
+                        txt_out += f"[{start_f} - {end_f}] {text}\n"
+                        if trans: txt_out += f"Tarjima: {trans}\n"
+                        txt_out += "\n"
+
+                    # --- IMZO (PECHAT) ---
+                    txt_out += "\n=========================================="
+                    txt_out += f"\n👤 Yaratuvchi: Shodlik (Otavaliyev_M)"
+                    txt_out += f"\n🤖 Platforma: Neon Karaoke Pro Web"
+                    txt_out += f"\n⏰ Yakunlangan vaqt: {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
+                    txt_out += "\n=========================================="
+
+                    # Natijani chiqarish
+                    render_neon_player(uploaded_file.getvalue(), p_data, save_now=True)
+                    st.download_button("📄 TXT Faylni Yuklab Olish", txt_out, file_name=f"{uploaded_file.name}.txt")
+                    
+        except Exception as e:
+            st.error(f"Xatolik yuz berdi: {e}")
         finally:
+            # O'z-o'zini tozalash
             if os.path.exists(temp_path): os.remove(temp_path)
+            if queue_manager["count"] > 0: queue_manager["count"] -= 1
+            st.rerun() # Navbatni yangilash
     else:
-        st.error("Audio yuklanmadi!")
+        st.error("Iltimos, fayl yuklang!")
 
-# --- 5. ORQA FONDA ISHLAYDIGAN BOT ---
-def background_bot():
-    bot = telebot.TeleBot(BOT_TOKEN)
-    
-    @bot.message_handler(commands=['start'])
-    def start_msg(m):
-        menu = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-        menu.add(types.KeyboardButton("🌐 Saytga kirish (Login)"), types.KeyboardButton("ℹ️ Yordam"))
-        bot.send_message(m.chat.id, "👋 Assalomu alaykum! Audio yuboring.", reply_markup=menu)
-
-    @bot.message_handler(func=lambda message: message.text == "🌐 Saytga kirish (Login)")
-    def open_site(m):
-        link = f"{SITE_URL}/?uid={m.chat.id}"
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🚀 Saytni Ochish", url=link))
-        bot.reply_to(m, "Shaxsiy havola:", reply_markup=markup)
-
-    @bot.message_handler(content_types=['audio', 'voice'])
-    def handle_docs(m):
-        path = f"b_{m.chat.id}_{datetime.now().timestamp()}.mp3"
-        try:
-            bot.reply_to(m, "⏳ Tahlil qilinmoqda...")
-            fid = m.audio.file_id if m.content_type=='audio' else m.voice.file_id
-            f_info = bot.get_file(fid); down = bot.download_file(f_info.file_path)
-            with open(path, "wb") as f: f.write(down)
-            
-            model = whisper.load_model("base"); res = model.transcribe(path)
-            txt = f"TRANSKRIPSIYA\nSana: {datetime.now(uz_tz)}\n\n"
-            for s in res['segments']:
-                txt += f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}] {s['text']}\n"
-            
-            txt += "\n---\n© Shodlik"
-            with open("res_bot.txt", "w", encoding="utf-8") as f: f.write(txt)
-            with open("res_bot.txt", "rb") as f: bot.send_document(m.chat.id, f, caption="✅ Tayyor!")
-            os.remove("res_bot.txt")
-        except Exception as e: bot.send_message(m.chat.id, f"Xato: {e}")
-        finally:
-            if os.path.exists(path): os.remove(path)
-
-    bot.infinity_polling()
-
-if 'bot_active' not in st.session_state:
-    st.session_state['bot_active'] = True
-    threading.Thread(target=background_bot, daemon=True).start()
-
-st.markdown('<div style="position:fixed; bottom:0; right:0; padding:5px; color:lime; font-size:10px;">Bot: Online</div>', unsafe_allow_html=True)
-
+st.markdown("---")
+st.caption("© Shodlik (Otavaliyev_M) | Barcha tahlillar xavfsiz va shaxsiydir.")
