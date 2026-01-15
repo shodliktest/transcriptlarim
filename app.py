@@ -138,14 +138,21 @@ if st.button("🚀 TAHLILNI BOSHLASH") and up:
             bar.progress(80)
             
             p_data = []
-            txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n\n"
+            txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
             t_code = {"🇺🇿 O'zbek":"uz","🇷🇺 Rus":"ru","🇬🇧 Ingliz":"en"}.get(lang)
 
             for s in trans.segments:
                 text = s['text'].strip()
                 tr = GoogleTranslator(source='auto', target=t_code).translate(text) if t_code else None
                 p_data.append({"start": s['start'], "end": s['end'], "text": text, "translated": tr})
-                txt_out += f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}] {text}\n" + (f"T: {tr}\n" if tr else "") + "\n"
+                
+                tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
+                txt_out += f"{tm} {text}\n" + (f"T: {tr}\n" if tr else "") + "\n"
+            
+            # --- PECHAT TIZIMI ---
+            uz_now = datetime.now(uz_tz).strftime('%H:%M:%S')
+            pechat = f"\n---\n👤 Shodlik (Otavaliyev_M) | ⏰ {uz_now} (UZB)\n🤖 Neon Pro Web Server"
+            txt_out += pechat
             
             bar.progress(100)
             st.markdown("<p style='color:#00ff88; text-align:center;'>✅ Tayyor!</p>", unsafe_allow_html=True)
@@ -156,6 +163,14 @@ if st.button("🚀 TAHLILNI BOSHLASH") and up:
 
         # NATIJANI CHIQARISH
         render_neon_player(up.getvalue(), p_data)
+        
+        # Saytda ham imzoni ko'rsatish
+        st.markdown(f"""
+            <div style="text-align:right; color:#00e5ff; font-size:12px; margin-top:10px; opacity:0.7;">
+                {pechat.replace('---\\n', '').replace('\\n', '<br>')}
+            </div>
+        """, unsafe_allow_html=True)
+        
         st.download_button("📄 TXT YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
 
     except Exception as e:
