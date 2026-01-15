@@ -219,3 +219,4 @@ if 'bot_active' not in st.session_state:
     threading.Thread(target=background_bot, daemon=True).start()
 
 st.markdown('<div style="position:fixed; bottom:0; right:0; padding:5px; color:lime; font-size:10px;">Bot: Online</div>', unsafe_allow_html=True)
+
