@@ -1,5 +1,5 @@
 import streamlit as st
-import os, json, base64, pytz, time
+import os, json, base64, pytz, time, threading
 from datetime import datetime
 from deep_translator import GoogleTranslator
 from groq import Groq
@@ -16,7 +16,7 @@ except Exception:
 
 st.set_page_config(page_title="Neon Karaoke Pro", layout="centered")
 
-# --- 2. KUCHAYTIRILGAN NEON DIZAYN (BELGILARSIZ) ---
+# --- 2. KUCHAYTIRILGAN NEON DIZAYN ---
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
@@ -30,28 +30,17 @@ st.markdown("""
         box-shadow: 0 0 20px #00e5ff, 0 0 40px #00e5ff;
         border-radius: 10px;
     }
-    .stProgress { height: 12px !important; margin-top: 10px; }
+    .stProgress { height: 12px !important; margin-bottom: 20px; }
 
-    /* --- FAYL YUKLASH BO'LIMI (TOZALANGAN) --- */
+    /* FAYL YUKLASH BO'LIMI */
     [data-testid="stFileUploader"] section { 
         background-color: #000 !important; 
         border: 3px dashed #00e5ff !important; 
         border-radius: 20px;
-        padding: 50px 20px !important;
+        padding: 40px;
         box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
     }
     
-    /* BELGILARI (SVG IKONKALARNI) OLIB TASHLASH */
-    [data-testid="stFileUploader"] section svg {
-        display: none !important;
-    }
-    
-    /* "Drag and drop file here" yozuvini yashirish (ixtiyoriy, toza ko'rinish uchun) */
-    [data-testid="stFileUploader"] section div div {
-        font-size: 0px !important;
-    }
-
-    /* Browse tugmasini neon qilish va matnini o'zgartirish */
     [data-testid="stFileUploader"] button {
          background-color: #000 !important;
          color: #00e5ff !important;
@@ -59,20 +48,18 @@ st.markdown("""
          box-shadow: 0 0 20px #00e5ff;
          border-radius: 10px;
          font-weight: bold;
-         font-size: 18px !important;
+         font-size: 20px !important;
          padding: 12px 25px !important;
-         display: block !important;
-         margin: 0 auto !important;
-         visibility: visible !important;
     }
     
+    /* Tugma matnini almashtirish */
     [data-testid="stFileUploader"] button span::before {
         content: "FAYL TANLASH UCHUN BOSING";
         visibility: visible;
-        font-size: 16px;
     }
     [data-testid="stFileUploader"] button span {
         visibility: hidden;
+        white-space: nowrap;
     }
 
     .limit-text {
@@ -80,7 +67,7 @@ st.markdown("""
         text-shadow: 0 0 10px #ff0055;
         font-weight: bold;
         text-align: center;
-        margin-bottom: 15px;
+        margin-bottom: 10px;
     }
 
     /* Asosiy Neon Tugmalar */
@@ -149,13 +136,15 @@ def render_neon_player(audio_bytes, transcript_data):
 # --- 4. ASOSIY LOGIKA ---
 st.title("🎧 NEON TRANSCRIPT WEB")
 
-st.markdown('<p class="limit-text">⚠️ MAKSIMAL 25MB | MP3, WAV</p>', unsafe_allow_html=True)
+st.markdown('<p class="limit-text">⚠️ CHEKLOV: Maksimal 25MB | Faqat MP3, WAV</p>', unsafe_allow_html=True)
 
 up = st.file_uploader("", type=['mp3', 'wav'], label_visibility="collapsed")
 lang = st.selectbox("Tarjima tilini tanlang:", ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬🇧 Ingliz", "📄 Original"], index=3)
 
 if st.button("🚀 TAHLILNI BOSHLASH") and up:
     path = f"tmp_{time.time()}.mp3"
+    
+    # --- TAHLIL JARAYONI (PROGRESS BAR BILAN) ---
     progress_container = st.container()
     with progress_container:
         status_text = st.markdown("<p style='color:#00e5ff; text-align:center; font-weight:bold;'>⚡ Jarayon boshlandi...</p>", unsafe_allow_html=True)
@@ -164,7 +153,7 @@ if st.button("🚀 TAHLILNI BOSHLASH") and up:
     try:
         with open(path, "wb") as f: f.write(up.getbuffer())
         
-        # Smooth progress simulation
+        # Simulyatsiya qilingan neon progress
         for i in range(1, 41):
             time.sleep(0.02)
             bar.progress(i)
@@ -199,9 +188,11 @@ if st.button("🚀 TAHLILNI BOSHLASH") and up:
         bar.progress(100)
         status_text.markdown("<p style='color:#00ff88; text-align:center; font-weight:bold;'>✅ Tayyor!</p>", unsafe_allow_html=True)
         time.sleep(1)
+        
+        # Progress barni tozalash
         progress_container.empty()
 
-        txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M) | 🤖 Neon Pro Web | ⏰ {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
+        txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M) | ⏰ {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
         
         render_neon_player(up.getvalue(), p_data)
         st.download_button("📄 TXT FAYLNI YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
