@@ -7,47 +7,121 @@ import json
 import requests
 from datetime import datetime
 from deep_translator import GoogleTranslator
+import base64
 
 # --- 1. SOZLAMALAR ---
-# Sizning Sayt manzilingiz (Aniq yozildi)
 SITE_URL = "https://shodlik1transcript.streamlit.app"
 
-# Maxfiy kalitlarni olish (Secrets)
 try:
     BOT_TOKEN = st.secrets["BOT_TOKEN"]
     FB_API_KEY = st.secrets["FB_API_KEY"]
     PROJECT_ID = st.secrets["PROJECT_ID"]
 except:
-    st.error("❌ Xatolik: Streamlit Secrets sozlanmagan!")
+    st.error("❌ Secrets kalitlari topilmadi!")
     st.stop()
 
-# Sahifa sozlamalari
-st.set_page_config(page_title="Karaoke Pro", layout="centered", page_icon="🎵")
+st.set_page_config(page_title="Neon Karaoke", layout="centered", page_icon="🎵")
 
-# --- 2. CSS DIZAYN (NEON & DARK) ---
+# --- 2. CSS DIZAYN (NEON PLAYER UCHUN) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #050505; color: white; }
-    h1, h2, h3 { color: #ffffff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; text-align: center; }
-    .karaoke-box {
-        background: rgba(20, 20, 20, 0.9); border: 2px solid #00e5ff;
-        border-radius: 15px; padding: 20px;
-        box-shadow: 0 0 20px rgba(0, 229, 255, 0.2); margin-top: 20px;
+    .stApp { background-color: #000000; color: white; }
+    h1, h2, h3 { color: white; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; text-align: center; }
+    
+    /* Neon Player Qutisi */
+    .neon-box {
+        background: #050505;
+        border: 2px solid #00e5ff;
+        box-shadow: 0 0 15px #00e5ff;
+        border-radius: 20px;
+        padding: 20px;
+        margin-top: 20px;
+        color: white;
     }
-    .lyric-line { padding: 10px; border-bottom: 1px solid #333; margin-bottom: 5px; }
-    .lyric-text { font-size: 20px; font-weight: bold; color: #fff; }
-    .lyric-trans { font-size: 16px; color: #aaa; font-style: italic; }
-    .status-ok { color: #0f0; border: 1px solid #0f0; padding: 10px; border-radius: 10px; text-align: center; font-weight: bold; }
+    
+    .status-ok { border: 1px solid lime; color: lime; padding: 5px; text-align: center; border-radius: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DASTUR MANTIQI (ROUTER) ---
+# --- 3. FUNKSIYA: NEON PLEYERNI CHIZISH ---
+def render_neon_player(audio_bytes, transcript_data):
+    # Audioni base64 qilish (HTML ichida o'qish uchun)
+    audio_b64 = base64.b64encode(audio_bytes).decode()
+    
+    # HTML + JS Kod (Siz yoqtirgan Neon effekt)
+    html = f"""
+    <div class="neon-box">
+        <h3 style="text-align:center; color:#00e5ff; margin-bottom:10px;">🎵 NEON KARAOKE 🎵</h3>
+        <audio id="player" controls style="width:100%; filter:invert(1); margin-bottom:20px;">
+            <source src="data:audio/mp3;base64,{audio_b64}" type="audio/mp3">
+        </audio>
+        <div id="lyrics" style="height:400px; overflow-y:auto; scroll-behavior:smooth; padding:10px; border-top:1px solid #333;"></div>
+    </div>
+
+    <script>
+        const audio = document.getElementById('player');
+        const box = document.getElementById('lyrics');
+        const data = {json.dumps(transcript_data)};
+        
+        // Matnlarni joylashtirish
+        data.forEach((line, index) => {{
+            const div = document.createElement('div');
+            div.id = 'line-' + index;
+            div.style.padding = '15px';
+            div.style.marginBottom = '10px';
+            div.style.transition = 'all 0.3s ease';
+            div.style.cursor = 'pointer';
+            div.style.borderBottom = '1px solid #222';
+            
+            let htmlContent = `<div style="font-size:20px; font-weight:bold; color:#555;">${{line.text}}</div>`;
+            if (line.translated) {{
+                htmlContent += `<div style="font-size:16px; color:#444; font-style:italic;">${{line.translated}}</div>`;
+            }}
+            div.innerHTML = htmlContent;
+            
+            // Bosganda o'sha joyga o'tish
+            div.onclick = () => {{ audio.currentTime = line.start; audio.play(); }};
+            box.appendChild(div);
+        }});
+
+        // Vaqt bo'yicha yurish
+        audio.ontimeupdate = () => {{
+            let activeIdx = data.findIndex(item => audio.currentTime >= item.start && audio.currentTime < item.end); // aniqroq vaqt
+            
+            // Hamma qatorlarni o'chirish
+            data.forEach((_, i) => {{
+                const el = document.getElementById('line-' + i);
+                if (el) {{
+                    el.children[0].style.color = '#555'; // Asl matn xira
+                    el.style.transform = 'scale(1)';
+                    el.style.borderLeft = 'none';
+                }}
+            }});
+
+            // Aktiv qatorni yoqish
+            if (activeIdx !== -1) {{
+                const activeEl = document.getElementById('line-' + activeIdx);
+                if (activeEl) {{
+                    activeEl.children[0].style.color = '#00e5ff'; // Neon rang
+                    activeEl.children[0].style.textShadow = '0 0 15px #00e5ff';
+                    activeEl.style.transform = 'scale(1.05)';
+                    activeEl.style.borderLeft = '4px solid #00e5ff';
+                    activeEl.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+                }}
+            }}
+        }};
+    </script>
+    """
+    st.components.v1.html(html, height=550)
+
+
+# --- 4. SAYT QISMI (FOYDALANUVCHI UCHUN) ---
 user_id = st.query_params.get("uid", None)
 
-# --- A) KARAOKE PLEYER REJIMI ---
 if user_id:
-    st.markdown("<h1>🎵 KARAOKE TARIXI</h1>", unsafe_allow_html=True)
+    st.title("📂 SHAXSIY ARXIV")
     
+    # 1. BAZADAN O'QISH
     url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents:runQuery?key={FB_API_KEY}"
     query = {
         "structuredQuery": {
@@ -59,28 +133,51 @@ if user_id:
     
     try:
         res = requests.post(url, json=query).json()
+        
         if res and len(res) > 0 and 'document' in res[0]:
-            for item in res:
+            st.success(f"Sizda {len(res)} ta saqlangan fayl bor.")
+            
+            for i, item in enumerate(res):
                 doc = item['document']['fields']
-                fname = doc['filename']['stringValue']
-                json_str = doc.get('data', doc.get('transcript', {})).get('stringValue')
+                fname = doc.get('filename', {}).get('stringValue', 'Audio')
+                json_str = doc.get('data', {}).get('stringValue')
+                
                 if json_str:
                     t_data = json.loads(json_str)
-                    with st.expander(f"🎧 {fname}"):
-                        html = f"""<div class="karaoke-box"><h3 style="color:#00e5ff; text-align:center;">{fname}</h3><div style="height:400px; overflow-y:auto;">"""
-                        for line in t_data:
-                            html += f"""<div class="lyric-line"><div class="lyric-text">{line['text']}</div>{'<div class="lyric-trans">'+line['translated']+'</div>' if line.get('translated') else ''}</div>"""
-                        html += "</div></div>"
-                        st.components.v1.html(html, height=450, scrolling=True)
+                    
+                    # HAR BIR FAYL UCHUN ALOHIDA OYNA
+                    with st.expander(f"🎵 {i+1}. {fname} (Ochish)"):
+                        st.write("### 1-qadam: Matn tayyor ✅")
+                        st.caption("Bot matnni tayyorlab qo'ygan. Uni quyida o'qishingiz mumkin.")
+                        
+                        # -----------------------------------------------
+                        # ENG MUHIM JOYI: AUDIO YUKLASH VA PLEYER
+                        # -----------------------------------------------
+                        st.write("### 2-qadam: Audioni yuklang (Pleyer uchun)")
+                        st.info("⚠️ Audio Telegramda qolgan. Neon effektini ko'rish uchun o'sha audioni shu yerga tashlang:")
+                        
+                        audio_file = st.file_uploader(f"MP3 faylni yuklang ({i})", type=['mp3', 'wav', 'ogg'], key=f"up_{i}")
+                        
+                        if audio_file:
+                            # AGAR AUDIO YUKLANSA -> NEON PLAYER ISHLAYDI
+                            render_neon_player(audio_file.getvalue(), t_data)
+                        else:
+                            # AGAR AUDIO YO'Q BO'LSA -> FAQAT MATN
+                            st.text_area("Matn ko'rinishi:", value="\n".join([f"{x['text']} ({x['translated'] or ''})" for x in t_data]), height=200)
+
         else:
-            st.warning("Tarix bo'sh.")
+            st.warning("📭 Arxiv bo'sh. Botga kirib audio yuboring.")
+            
     except Exception as e:
-        st.error(f"Xato: {e}")
+        st.error(f"Xatolik: {e}")
+
+    # Sayt shu yerda tugaydi, Bot qismiga o'tmaydi
     st.stop()
 
-# --- B) BOT SERVER REJIMI ---
-st.title("🤖 Bot Server Statusi")
-st.markdown('<div class="status-ok">✅ TIZIM AKTIV</div>', unsafe_allow_html=True)
+
+# --- 5. BOT SERVER QISMI (ADMIN UCHUN) ---
+st.title("🤖 Bot Server")
+st.markdown('<div class="status-ok">✅ AKTIV</div>', unsafe_allow_html=True)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 user_data = {}
@@ -91,100 +188,72 @@ def save_to_firestore(uid, username, filename, transcript_data):
         url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/transcriptions?key={FB_API_KEY}"
         payload = {"fields": {"uid": {"stringValue": str(uid)}, "username": {"stringValue": str(username)}, "filename": {"stringValue": filename}, "data": {"stringValue": json.dumps(transcript_data)}, "created_at": {"stringValue": now}}}
         requests.post(url, json=payload)
-    except Exception as e: print(f"Save Error: {e}")
+    except: pass
 
 @bot.message_handler(commands=['start'])
-def welcome(m):
-    my_link = f"{SITE_URL}/?uid={m.chat.id}"
+def start(m):
+    link = f"{SITE_URL}/?uid={m.chat.id}"
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📂 Mening Arxivim (Sayt)", url=my_link))
-    bot.reply_to(m, "👋 Assalomu alaykum! Audio yuboring.", reply_markup=markup)
+    markup.add(types.InlineKeyboardButton("📂 Arxiv va Pleyer", url=link))
+    bot.reply_to(m, "Assalomu alaykum! Audio yuboring.", reply_markup=markup)
 
 @bot.message_handler(content_types=['audio', 'voice'])
-def handle_audio(m):
+def audio_handler(m):
     try:
-        if m.content_type=='audio': fid=m.audio.file_id; fname=m.audio.file_name or "audio.mp3"
+        if m.content_type=='audio': fid=m.audio.file_id; fname=m.audio.file_name
         else: fid=m.voice.file_id; fname="voice.ogg"
-            
-        f_info = bot.get_file(fid)
-        down_file = bot.download_file(f_info.file_path)
-        path = f"u_{m.chat.id}_{int(datetime.now().timestamp())}.mp3"
-        with open(path, "wb") as f: f.write(down_file)
+        
+        file_info = bot.get_file(fid)
+        downloaded = bot.download_file(file_info.file_path)
+        path = f"u_{m.chat.id}.mp3"
+        with open(path, "wb") as f: f.write(downloaded)
         
         user_data[m.chat.id] = {"path": path, "name": fname}
         
-        mark = types.InlineKeyboardMarkup(row_width=2)
-        mark.add(types.InlineKeyboardButton("🇺🇿 O'zbek", callback_data="uz"), types.InlineKeyboardButton("🇷🇺 Rus", callback_data="ru"), types.InlineKeyboardButton("🇬🇧 Ingliz", callback_data="en"), types.InlineKeyboardButton("📄 Original", callback_data="original"))
-        
-        bot.send_message(m.chat.id, "Tarjima tilini tanlang:", reply_markup=mark)
-    except Exception as e: bot.send_message(m.chat.id, f"Xato: {e}")
-
-@bot.callback_query_handler(func=lambda c: True)
-def process_callback(c):
-    cid = c.message.chat.id
-    if cid not in user_data: 
-        bot.answer_callback_query(c.id, "Eskirgan so'rov.")
-        return
-
-    # 1. Eski menyuni o'chiramiz (Til tanlash knopkasi yo'qoladi)
-    try: bot.delete_message(cid, c.message.message_id)
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(types.InlineKeyboardButton("🇺🇿 O'zbek", callback_data="uz"), types.InlineKeyboardButton("🇷🇺 Rus", callback_data="ru"), types.InlineKeyboardButton("📄 Original", callback_data="original"))
+        bot.send_message(m.chat.id, "Tilni tanlang:", reply_markup=markup)
     except: pass
 
-    # 2. "Kuting" xabarini chiqaramiz
-    msg = bot.send_message(cid, "⏳ Tahlil va Tarjima ketmoqda... (Kuting)")
+@bot.callback_query_handler(func=lambda c: True)
+def inline(c):
+    cid = c.message.chat.id
+    if cid not in user_data: return
+    try: bot.delete_message(cid, c.message.message_id)
+    except: pass
+    
+    msg = bot.send_message(cid, "⏳ Tahlil ketmoqda...")
     
     try:
-        path = user_data[cid]["path"]
-        name = user_data[cid]["name"]
-        lang = c.data
+        path = user_data[cid]["path"]; name = user_data[cid]["name"]; lang = c.data
+        model = whisper.load_model("base"); res = model.transcribe(path)
         
-        model = whisper.load_model("base")
-        res = model.transcribe(path)
-        
-        data = []
-        txt_out = f"TRANSKRIPSIYA: {name}\nSana: {datetime.now()}\n\n"
-        
+        data = []; txt_out = f"Fayl: {name}\n\n"
         for s in res['segments']:
-            t = s['text'].strip()
-            tr = None
+            t = s['text'].strip(); tr = None
             if lang != "original":
                 try: tr = GoogleTranslator(source='auto', target=lang).translate(t)
                 except: pass
-            
-            time_str = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
-            txt_out += f"{time_str} {t}\n"
-            if tr: txt_out += f"Tarjima: {tr}\n"
-            txt_out += "\n"
+            txt_out += f"[{int(s['start'])}] {t}\n"
             data.append({"start":s['start'], "text":t, "translated":tr})
             
-        txt_out += "\n---\nBot by Shodlik"
+        save_to_firestore(cid, c.from_user.first_name, name, data)
         
-        uname = c.from_user.username or c.from_user.first_name
-        save_to_firestore(cid, uname, name, data)
+        with open("natija.txt", "w", encoding="utf-8") as f: f.write(txt_out)
         
-        out_name = f"{name}_natija.txt"
-        with open(out_name, "w", encoding="utf-8") as f: f.write(txt_out)
-        
-        # 3. Saytga Link yasaymiz
         link = f"{SITE_URL}/?uid={cid}"
         mark = types.InlineKeyboardMarkup()
-        # MANA BU YERDA TUGMA QO'SHILDI
-        mark.add(types.InlineKeyboardButton("🎵 Neon Pleyerda ochish", url=link))
+        mark.add(types.InlineKeyboardButton("🎵 Saytda Pleyerda Ko'rish", url=link))
         
-        with open(out_name, "rb") as f:
-            bot.send_document(cid, f, caption="✅ Tahlil yakunlandi!", reply_markup=mark)
+        with open("natija.txt", "rb") as f:
+            bot.send_document(cid, f, caption="✅ Tayyor! Pleyerda ko'rish uchun audioni saytga yuklashingiz kerak bo'ladi.", reply_markup=mark)
             
-        # 4. "Kuting" xabarini O'CHIRAMIZ (Chat toza bo'ladi)
-        try: bot.delete_message(cid, msg.message_id)
-        except: pass
-
-        os.remove(path)
-        os.remove(out_name)
+        bot.delete_message(cid, msg.message_id)
+        os.remove(path); os.remove("natija.txt")
         
-    except Exception as e:
-        bot.send_message(cid, f"Xato: {e}")
-        if os.path.exists(path): os.remove(path)
+    except Exception as e: bot.send_message(cid, f"Xato: {e}")
 
 if __name__ == "__main__":
     try: bot.infinity_polling()
     except: pass
+                            
