@@ -8,39 +8,147 @@ import requests
 from datetime import datetime
 from deep_translator import GoogleTranslator
 
-# --- 1. BOT VA FIREBASE SOZLAMALARI ---
-# Siz bergan Token
-BOT_TOKEN = "8295692699:AAGQh6_Syp5uxo-M62wZkaKxnOm_KEU5ruw"
+# --- 1. SOZLAMALAR ---
+# Sayt manzili (Siz bergan URL)
+SITE_URL = "https://shodlik1transcript.streamlit.app"
 
-# Firebase Kalitlari (Avvalgi suhbatdan)
-FB_API_KEY = "AIzaSyD41LIwGEcnVDmsFU73mj12ruoz2s3jdgw"
-PROJECT_ID = "karoke-pro"
+# Maxfiy kalitlarni olish (Secrets)
+try:
+    BOT_TOKEN = st.secrets["BOT_TOKEN"]
+    FB_API_KEY = st.secrets["FB_API_KEY"]
+    PROJECT_ID = st.secrets["PROJECT_ID"]
+except:
+    st.error("❌ Xatolik: Streamlit Secrets sozlanmagan!")
+    st.stop()
 
-# Botni ulash
-bot = telebot.TeleBot(BOT_TOKEN)
+# Sahifa sozlamalari (Qora fon va Neon effekt uchun)
+st.set_page_config(page_title="Karaoke Pro", layout="centered", page_icon="🎵")
 
-# --- 2. STREAMLIT INTERFEYSI (Server o'chmasligi uchun) ---
-st.set_page_config(page_title="Karaoke Bot Server", layout="centered")
+# --- 2. CSS DIZAYN (NEON & DARK) ---
 st.markdown("""
-    <style>
-        .stApp { background-color: #0e1117; color: white; text-align: center; }
-        .status { padding: 20px; border-radius: 10px; background-color: #00CC00; color: black; font-weight: bold; }
-    </style>
+<style>
+    /* Umumiy fon - Qora */
+    .stApp { background-color: #050505; color: white; }
+    
+    /* Neon matnlar */
+    h1, h2, h3 { 
+        color: #ffffff; 
+        text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; 
+        text-align: center;
+    }
+    
+    /* Karaoke qutisi */
+    .karaoke-box {
+        background: rgba(20, 20, 20, 0.9);
+        border: 2px solid #00e5ff;
+        border-radius: 15px;
+        padding: 20px;
+        box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+        margin-top: 20px;
+    }
+    
+    /* Matn qatorlari */
+    .lyric-line {
+        padding: 10px;
+        border-bottom: 1px solid #333;
+        margin-bottom: 5px;
+    }
+    .lyric-text { font-size: 20px; font-weight: bold; color: #fff; }
+    .lyric-trans { font-size: 16px; color: #aaa; font-style: italic; }
+    
+    /* Server statusi */
+    .status-ok { 
+        color: #0f0; border: 1px solid #0f0; padding: 10px; 
+        border-radius: 10px; text-align: center; font-weight: bold;
+    }
+</style>
 """, unsafe_allow_html=True)
 
-st.title("🤖 Telegram Bot Serveri")
-st.markdown('<div class="status">✅ BOT ISHLAMOQDA!</div>', unsafe_allow_html=True)
-st.write(f"Bot ulangan: @{bot.get_me().username}")
-st.info("Endi brauzerni yopib, Telegramdan botni ishlatavering.")
+# --- 3. DASTUR MANTIQI (ROUTER) ---
+# URL dan 'uid' ni tekshiramiz
+query_params = st.query_params
+user_id = query_params.get("uid", None)
 
-# --- 3. FIREBASEGA SAQLASH FUNKSIYASI ---
+# --- A) KARAOKE PLEYER REJIMI (Foydalanuvchi uchun) ---
+if user_id:
+    st.markdown("<h1>🎵 KARAOKE TARIXI</h1>", unsafe_allow_html=True)
+    
+    # Firebase'dan ma'lumot o'qish
+    url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents:runQuery?key={FB_API_KEY}"
+    query = {
+        "structuredQuery": {
+            "from": [{"collectionId": "transcriptions"}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": "uid"},
+                    "op": "EQUAL",
+                    "value": {"stringValue": str(user_id)}
+                }
+            },
+            "orderBy": [{"field": {"fieldPath": "created_at"}, "direction": "DESCENDING"}]
+        }
+    }
+    
+    try:
+        res = requests.post(url, json=query).json()
+        
+        if res and len(res) > 0 and 'document' in res[0]:
+            count = 0
+            for item in res:
+                doc = item['document']['fields']
+                fname = doc['filename']['stringValue']
+                # Data maydoni ba'zida 'data', ba'zida 'transcript' bo'lishi mumkin
+                json_str = doc.get('data', doc.get('transcript', {})).get('stringValue')
+                
+                if json_str:
+                    t_data = json.loads(json_str)
+                    count += 1
+                    
+                    with st.expander(f"🎧 {count}. {fname}"):
+                        # HTML Neon Player Render
+                        html = f"""
+                        <div class="karaoke-box">
+                            <h3 style="color:#00e5ff; text-align:center; margin-bottom:10px;">{fname}</h3>
+                            <div style="height:400px; overflow-y:auto; padding-right:5px;">
+                        """
+                        for line in t_data:
+                            html += f"""
+                            <div class="lyric-line">
+                                <div class="lyric-text">{line['text']}</div>
+                                {'<div class="lyric-trans">'+line['translated']+'</div>' if line.get('translated') else ''}
+                            </div>
+                            """
+                        html += "</div></div>"
+                        st.components.v1.html(html, height=450, scrolling=True)
+            
+            if count == 0:
+                st.info("Ma'lumotlar topilmadi yoki format eskirgan.")
+        else:
+            st.warning("Sizda hali saqlangan tahlillar yo'q.")
+            
+    except Exception as e:
+        st.error(f"Bazaga ulanishda xato: {e}")
+
+    # Pleyer rejimida kod shu yerda to'xtaydi (Botni yurgizmaydi)
+    st.stop()
+
+
+# --- B) BOT SERVER REJIMI (Admin/Server uchun) ---
+# Agar 'uid' bo'lmasa, demak bu Serverning o'zi. Botni ishga tushiramiz.
+
+st.title("🤖 Bot Server Statusi")
+st.markdown('<div class="status-ok">✅ TIZIM AKTIV</div>', unsafe_allow_html=True)
+st.write("Ushbu sahifa ochiq tursa, Telegram bot ishlaydi.")
+
+# Botni sozlash
+bot = telebot.TeleBot(BOT_TOKEN)
+user_data = {}
+
+# --- FIREBASE WRITE FUNKSIYASI ---
 def save_to_firestore(uid, username, filename, transcript_data):
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # To'g'ridan-to'g'ri REST API orqali yozish URL manzili
         url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/transcriptions?key={FB_API_KEY}"
-        
-        # Ma'lumotlar paketi
         payload = {
             "fields": {
                 "uid": {"stringValue": str(uid)},
@@ -50,152 +158,124 @@ def save_to_firestore(uid, username, filename, transcript_data):
                 "created_at": {"stringValue": now}
             }
         }
-        # So'rov yuborish
-        response = requests.post(url, json=payload)
-        if response.status_code == 200:
-            print("✅ Bazaga saqlandi")
-        else:
-            print(f"❌ Bazaga yozishda xato: {response.text}")
+        requests.post(url, json=payload)
     except Exception as e:
-        print(f"Baza xatosi: {e}")
+        print(f"Save Error: {e}")
 
-# --- 4. BOT MANTIQI ---
-user_data = {}
-
+# --- BOT HANDLERS ---
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, 
+def welcome(m):
+    # Shaxsiy arxivga havola
+    my_link = f"{SITE_URL}/?uid={m.chat.id}"
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📂 Mening Arxivim (Sayt)", url=my_link))
+    
+    bot.reply_to(m, 
                  "👋 **Assalomu alaykum!**\n\n"
-                 "🎤 Menga **Audio fayl** yoki **Ovozli xabar** yuboring.\n"
-                 "📝 Men uni matnga aylantirib, TXT fayl qilib beraman.\n"
-                 "💾 Barcha tarixi bazada saqlanadi.")
+                 "Menga audio yuboring, men uni matnga aylantirib beraman.\n"
+                 "Barcha tarixingizni quyidagi tugma orqali ko'rasiz:", 
+                 reply_markup=markup)
 
 @bot.message_handler(content_types=['audio', 'voice'])
-def handle_audio(message):
+def handle_audio(m):
     try:
-        chat_id = message.chat.id
-        
-        # Faylni aniqlash
-        if message.content_type == 'audio':
-            file_info = bot.get_file(message.audio.file_id)
-            file_name = message.audio.file_name or "audio.mp3"
-        else: # Ovozli xabar
-            file_info = bot.get_file(message.voice.file_id)
-            file_name = "voice_message.ogg"
-
-        # Yuklab olish xabari
-        bot.send_message(chat_id, "📥 Audio qabul qilindi. Yuklanmoqda...")
-
-        # Faylni serverga yuklash
-        downloaded_file = bot.download_file(file_info.file_path)
-        
-        # Vaqtinchalik nom bilan saqlash
-        temp_name = f"user_{chat_id}_{int(datetime.now().timestamp())}.mp3"
-        with open(temp_name, 'wb') as new_file:
-            new_file.write(downloaded_file)
+        if m.content_type=='audio': 
+            fid=m.audio.file_id; fname=m.audio.file_name or "audio.mp3"
+        else: 
+            fid=m.voice.file_id; fname="voice.ogg"
             
-        # User ma'lumotlarini eslab qolish
-        user_data[chat_id] = {"file_path": temp_name, "orig_name": file_name}
-
-        # Til tanlash tugmalari
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        btn1 = types.InlineKeyboardButton("🇺🇿 O'zbek", callback_data="uz")
-        btn2 = types.InlineKeyboardButton("🇷🇺 Rus", callback_data="ru")
-        btn3 = types.InlineKeyboardButton("🇬🇧 Ingliz", callback_data="en")
-        btn4 = types.InlineKeyboardButton("📄 Original (Tarjimasiz)", callback_data="original")
-        markup.add(btn1, btn2, btn3, btn4)
+        bot.send_message(m.chat.id, "📥 Audio qabul qilindi...")
         
-        bot.send_message(chat_id, "Qaysi tilga tarjima qilay?", reply_markup=markup)
-
+        f_info = bot.get_file(fid)
+        down_file = bot.download_file(f_info.file_path)
+        
+        # Temp save
+        path = f"u_{m.chat.id}_{int(datetime.now().timestamp())}.mp3"
+        with open(path, "wb") as f: f.write(down_file)
+        
+        user_data[m.chat.id] = {"path": path, "name": fname}
+        
+        # Lang buttons
+        mark = types.InlineKeyboardMarkup(row_width=2)
+        mark.add(types.InlineKeyboardButton("🇺🇿 O'zbek", callback_data="uz"),
+                 types.InlineKeyboardButton("🇷🇺 Rus", callback_data="ru"),
+                 types.InlineKeyboardButton("🇬🇧 Ingliz", callback_data="en"),
+                 types.InlineKeyboardButton("📄 Original", callback_data="original"))
+        
+        bot.send_message(m.chat.id, "Tarjima tilini tanlang:", reply_markup=mark)
+        
     except Exception as e:
-        bot.send_message(message.chat.id, f"Xatolik yuz berdi: {e}")
+        bot.send_message(m.chat.id, f"Xato: {e}")
 
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    chat_id = call.message.chat.id
-    if chat_id not in user_data: 
-        bot.answer_callback_query(call.id, "Fayl eskirgan, qaytadan yuboring.")
+@bot.callback_query_handler(func=lambda c: True)
+def process_callback(c):
+    cid = c.message.chat.id
+    if cid not in user_data: 
+        bot.answer_callback_query(c.id, "Eskirgan so'rov.")
         return
 
-    # Xabarni o'zgartirish
-    bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, 
-                          text="⏳ **Sun'iy intellekt ishlamoqda...**\n\n(Bu audio hajmiga qarab biroz vaqt olishi mumkin)")
+    msg = bot.send_message(cid, "⏳ Tahlil va Tarjima ketmoqda... (Kuting)")
     
     try:
-        file_path = user_data[chat_id]["file_path"]
-        orig_name = user_data[chat_id]["orig_name"]
-        lang = call.data
+        path = user_data[cid]["path"]
+        name = user_data[cid]["name"]
+        lang = c.data
         
-        # --- WHISPER MODELINI ISHLATISH ---
-        # Streamlit Cloud resursi yetishi uchun 'base' model ishlatamiz
+        # Whisper
         model = whisper.load_model("base")
-        result = model.transcribe(file_path)
+        res = model.transcribe(path)
         
-        # --- MA'LUMOTLARNI FORMATLASH ---
-        txt_content = f"TRANSKRIPSIYA HISOBOTI\nFayl nomi: {orig_name}\n"
-        txt_content += f"Sana: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        data = []
+        txt_out = f"TRANSKRIPSIYA: {name}\nSana: {datetime.now()}\n\n"
         
-        firebase_data = [] # Bazaga ketadigan ro'yxat
-        
-        for s in result['segments']:
-            text = s['text'].strip()
-            trans = None
-            
-            # Tarjima jarayoni
+        for s in res['segments']:
+            t = s['text'].strip()
+            tr = None
             if lang != "original":
-                try: 
-                    trans = GoogleTranslator(source='auto', target=lang).translate(text)
-                except: 
-                    pass
+                try: tr = GoogleTranslator(source='auto', target=lang).translate(t)
+                except: pass
             
-            # Vaqt formati: [00:12 - 00:15]
-            start_m = int(s['start'] // 60)
-            start_s = int(s['start'] % 60)
-            end_m = int(s['end'] // 60)
-            end_s = int(s['end'] % 60)
-            timestamp = f"[{start_m:02d}:{start_s:02d} - {end_m:02d}:{end_s:02d}]"
+            # Time & Text
+            time_str = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
             
-            # TXT faylga yozish
-            txt_content += f"{timestamp} {text}\n"
-            if trans: 
-                txt_content += f"Tarjima: {trans}\n"
-            txt_content += "\n" # Bo'sh qator
+            txt_out += f"{time_str} {t}\n"
+            if tr: txt_out += f"Tarjima: {tr}\n"
+            txt_out += "\n"
             
-            # Bazaga yig'ish
-            firebase_data.append({
-                "start": s['start'],
-                "end": s['end'],
-                "text": text,
-                "translated": trans
-            })
-
-        # --- IMZO QO'SHISH ---
-        txt_content += f"\n---\nYaratuvchi: Shodlik (Otavaliyev_M)\nTelegram: @Otavaliyev_M"
-
-        # --- FIREBASE GA SAQLASH ---
-        username = call.from_user.username or call.from_user.first_name or "Foydalanuvchi"
-        save_to_firestore(chat_id, username, orig_name, firebase_data)
-
-        # --- TELEGRAMGA YUBORISH ---
-        out_filename = f"{orig_name}_natija.txt"
-        with open(out_filename, "w", encoding="utf-8") as f:
-            f.write(txt_content)
+            data.append({"start":s['start'], "text":t, "translated":tr})
+            
+        txt_out += "\n---\nBot by Shodlik"
         
-        with open(out_filename, "rb") as f:
-            bot.send_document(chat_id, f, caption="✅ **Tahlil yakunlandi!**\n\n💾 Nusxasi ma'lumotlar bazasiga saqlandi.")
+        # Bazaga yozish
+        uname = c.from_user.username or c.from_user.first_name
+        save_to_firestore(cid, uname, name, data)
+        
+        # Fayl yozish
+        out_name = f"{name}_natija.txt"
+        with open(out_name, "w", encoding="utf-8") as f: f.write(txt_out)
+        
+        # Yuborish
+        link = f"{SITE_URL}/?uid={cid}"
+        mark = types.InlineKeyboardMarkup()
+        mark.add(types.InlineKeyboardButton("🎵 Pleyerda ochish", url=link))
+        
+        with open(out_name, "rb") as f:
+            bot.send_document(cid, f, caption="✅ Marhamat!", reply_markup=mark)
             
-        # --- TOZALASH ---
-        if os.path.exists(file_path): os.remove(file_path)
-        if os.path.exists(out_filename): os.remove(out_filename)
+        # Tozalash
+        bot.delete_message(cid, msg.message_id)
+        os.remove(path)
+        os.remove(out_name)
         
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Xatolik: {e}")
-        # Agar fayl qolib ketgan bo'lsa o'chirish
-        if os.path.exists(file_path): os.remove(file_path)
+        bot.send_message(cid, f"Xato: {e}")
+        if os.path.exists(path): os.remove(path)
 
-# --- BOTNI UZLUKSIZ ISHLATISH LOOP ---
+# Botni faqat Server rejimida ishga tushirish
 if __name__ == "__main__":
     try:
         bot.infinity_polling()
-    except Exception as e:
-        st.error(f"Bot to'xtadi: {e}")
+    except:
+        pass
+        
