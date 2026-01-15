@@ -1,5 +1,5 @@
 import streamlit as st
-import os, json, base64, pytz, time
+import os, json, base64, pytz, time, threading
 from datetime import datetime
 from deep_translator import GoogleTranslator
 from groq import Groq
@@ -24,16 +24,53 @@ st.markdown("""
     .stApp { background-color: #000000 !important; color: white !important; }
     h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
 
-    /* Neon Selectbox */
-    div[data-baseweb="select"] > div {
-        background-color: #000 !important;
-        border: 2px solid #00e5ff !important;
-        box-shadow: 0 0 10px #00e5ff;
+    /* --- NEON PROGRESS BAR (SLIDER) --- */
+    .stProgress > div > div > div > div {
+        background-image: linear-gradient(to right, #00e5ff, #00ff88) !important;
+        box-shadow: 0 0 20px #00e5ff, 0 0 40px #00e5ff;
         border-radius: 10px;
     }
-    div[data-baseweb="select"] span { color: #00e5ff !important; font-weight: bold; }
+    .stProgress { height: 12px !important; margin-bottom: 20px; }
+
+    /* FAYL YUKLASH BO'LIMI */
+    [data-testid="stFileUploader"] section { 
+        background-color: #000 !important; 
+        border: 3px dashed #00e5ff !important; 
+        border-radius: 20px;
+        padding: 40px;
+        box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+    }
     
-    /* BARCHA TUGMALAR (Boshlash va Yuklab olish) */
+    [data-testid="stFileUploader"] button {
+         background-color: #000 !important;
+         color: #00e5ff !important;
+         border: 2px solid #00e5ff !important;
+         box-shadow: 0 0 20px #00e5ff;
+         border-radius: 10px;
+         font-weight: bold;
+         font-size: 20px !important;
+         padding: 12px 25px !important;
+    }
+    
+    /* Tugma matnini almashtirish */
+    [data-testid="stFileUploader"] button span::before {
+        content: "FAYL TANLASH UCHUN BOSING";
+        visibility: visible;
+    }
+    [data-testid="stFileUploader"] button span {
+        visibility: hidden;
+        white-space: nowrap;
+    }
+
+    .limit-text {
+        color: #ff0055;
+        text-shadow: 0 0 10px #ff0055;
+        font-weight: bold;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+
+    /* Asosiy Neon Tugmalar */
     div.stButton > button, div.stDownloadButton > button {
         background-color: #000 !important;
         color: #00e5ff !important;
@@ -42,52 +79,10 @@ st.markdown("""
         border-radius: 12px;
         font-weight: bold;
         width: 100%;
-        transition: 0.3s;
         text-transform: uppercase;
-    }
-    div.stButton > button:hover, div.stDownloadButton > button:hover {
-        background-color: #00e5ff !important;
-        color: #000 !important;
-        box-shadow: 0 0 35px #00e5ff;
-    }
-
-    /* --- FAYL YUKLASH BO'LIMI (CUSTOM NEON BUTTON) --- */
-    [data-testid="stFileUploader"] section { 
-        background-color: #000 !important; 
-        border: 2px dashed #00e5ff !important; 
-        border-radius: 15px;
-        padding: 30px;
-        box-shadow: 0 0 10px rgba(0, 229, 255, 0.1);
+        margin-top: 15px;
     }
     
-    /* Browse tugmasini butunlay neon qilish va matnini o'zgartirish */
-    [data-testid="stFileUploader"] button {
-         background-color: #000 !important;
-         color: #00e5ff !important;
-         border: 2px solid #00e5ff !important;
-         box-shadow: 0 0 10px #00e5ff;
-         border-radius: 8px;
-         font-weight: bold;
-         padding: 8px 20px;
-    }
-    
-    /* Tugma matnini "fayl tanlash uchun bosing" ga o'zgartirish */
-    [data-testid="stFileUploader"] button span::before {
-        content: "fayl tanlash uchun bosing";
-        visibility: visible;
-    }
-    [data-testid="stFileUploader"] button span {
-        visibility: hidden;
-        white-space: nowrap;
-    }
-
-    /* Yuklash oynasidagi boshqa matnlar */
-    [data-testid="stFileUploader"] div, [data-testid="stFileUploader"] small {
-        color: #00e5ff !important;
-        text-shadow: 0 0 5px #00e5ff;
-    }
-    
-    /* Neon Player Box */
     .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 25px rgba(0,229,255,0.4); border-radius: 20px; padding: 25px; margin-top: 25px; }
 </style>
 """, unsafe_allow_html=True)
@@ -141,45 +136,70 @@ def render_neon_player(audio_bytes, transcript_data):
 # --- 4. ASOSIY LOGIKA ---
 st.title("🎧 NEON TRANSCRIPT WEB")
 
-# Fayl yuklovchi
-up = st.file_uploader("", type=['mp3', 'wav'])
+st.markdown('<p class="limit-text">⚠️ CHEKLOV: Maksimal 25MB | Faqat MP3, WAV</p>', unsafe_allow_html=True)
 
+up = st.file_uploader("", type=['mp3', 'wav'], label_visibility="collapsed")
 lang = st.selectbox("Tarjima tilini tanlang:", ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬🇧 Ingliz", "📄 Original"], index=3)
 
 if st.button("🚀 TAHLILNI BOSHLASH") and up:
     path = f"tmp_{time.time()}.mp3"
+    
+    # --- TAHLIL JARAYONI (PROGRESS BAR BILAN) ---
+    progress_container = st.container()
+    with progress_container:
+        status_text = st.markdown("<p style='color:#00e5ff; text-align:center; font-weight:bold;'>⚡ Jarayon boshlandi...</p>", unsafe_allow_html=True)
+        bar = st.progress(0)
+
     try:
-        with st.spinner("⚡ AI tahlil qilmoqda..."):
-            with open(path, "wb") as f: f.write(up.getbuffer())
-            
-            with open(path, "rb") as file:
-                transcription = client.audio.transcriptions.create(
-                    file=(path, file.read()),
-                    model="whisper-large-v3-turbo",
-                    response_format="verbose_json",
-                )
-            
-            p_data = []
-            txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
-            t_code = {"🇺🇿 O'zbek":"uz","🇷🇺 Rus":"ru","🇬🇧 Ingliz":"en"}.get(lang)
+        with open(path, "wb") as f: f.write(up.getbuffer())
+        
+        # Simulyatsiya qilingan neon progress
+        for i in range(1, 41):
+            time.sleep(0.02)
+            bar.progress(i)
+        
+        status_text.markdown("<p style='color:#00e5ff; text-align:center; font-weight:bold;'>🚀 AI audioni eshitmoqda...</p>", unsafe_allow_html=True)
+        
+        # Groq API call
+        with open(path, "rb") as file:
+            transcription = client.audio.transcriptions.create(
+                file=(path, file.read()),
+                model="whisper-large-v3-turbo",
+                response_format="verbose_json",
+            )
+        
+        for i in range(41, 91):
+            time.sleep(0.01)
+            bar.progress(i)
 
-            for s in transcription.segments:
-                orig_text = s['text'].strip()
-                tr = GoogleTranslator(source='auto', target=t_code).translate(orig_text) if t_code else None
-                p_data.append({"start": s['start'], "end": s['end'], "text": orig_text, "translated": tr})
-                
-                tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
-                txt_out += f"{tm} {orig_text}\n" + (f"Tarjima: {tr}\n" if tr else "") + "\n"
+        status_text.markdown("<p style='color:#00e5ff; text-align:center; font-weight:bold;'>🌐 Matn shakllantirilmoqda...</p>", unsafe_allow_html=True)
+        
+        p_data = []
+        txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
+        t_code = {"🇺🇿 O'zbek":"uz","🇷🇺 Rus":"ru","🇬🇧 Ingliz":"en"}.get(lang)
 
-            txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M) | ⏰ {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
-            
-            render_neon_player(up.getvalue(), p_data)
-            st.download_button("📄 TXT FAYLNI YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
+        for s in transcription.segments:
+            orig_text = s['text'].strip()
+            tr = GoogleTranslator(source='auto', target=t_code).translate(orig_text) if t_code else None
+            p_data.append({"start": s['start'], "end": s['end'], "text": orig_text, "translated": tr})
+            tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
+            txt_out += f"{tm} {orig_text}\n" + (f"Tarjima: {tr}\n" if tr else "") + "\n"
+
+        bar.progress(100)
+        status_text.markdown("<p style='color:#00ff88; text-align:center; font-weight:bold;'>✅ Tayyor!</p>", unsafe_allow_html=True)
+        time.sleep(1)
+        
+        # Progress barni tozalash
+        progress_container.empty()
+
+        txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M) | ⏰ {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
+        
+        render_neon_player(up.getvalue(), p_data)
+        st.download_button("📄 TXT FAYLNI YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
 
     except Exception as e:
         st.error(f"Xatolik yuz berdi: {e}")
     finally:
-        if os.path.exists(path):
-            os.remove(path)
+        if os.path.exists(path): os.remove(path)
 
 st.caption("© Shodlik (Otavaliyev_M)")
