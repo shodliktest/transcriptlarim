@@ -1,7 +1,4 @@
 streamlit
-openai-whisper
-requests
-deep-translator
-pyTelegramBotAPI
-ffmpeg-python
-
+groq
+deep_translator
+pytz
