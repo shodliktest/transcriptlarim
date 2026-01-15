@@ -24,76 +24,61 @@ except:
 
 st.set_page_config(page_title="Neon Karaoke Pro", layout="centered", page_icon="🎵")
 
-# --- 2. DIZAYN ( FAQAT NEON VA QORA ) ---
+# --- 2. DIZAYN VA STREAMLITNI YASHIRISH (CSS) ---
 st.markdown("""
 <style>
-    /* Asosiy fon */
+    /* 1. STREAMLIT ELEMENTLARINI BUTUNLAY YASHIRISH */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display:none;}
+    [data-testid="stViewerBadge"] {display: none;}
+    
+    /* 2. ASOSIY FON VA NEON DIZAYN */
     .stApp { background-color: #000000 !important; color: white !important; }
     h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
 
-    /* 1. UPLOAD (FAYL YUKLASH) QISMI */
-    [data-testid="stFileUploader"] section {
-        background-color: #000 !important;
-        border: 2px dashed #00e5ff !important;
-        border-radius: 15px;
-        padding: 20px;
-        box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
-    }
-    [data-testid="stFileUploader"] span, [data-testid="stFileUploader"] div, [data-testid="stFileUploader"] small {
-        color: #00e5ff !important; /* Yozuvlar neon ko'k */
-        text-shadow: 0 0 5px #00e5ff;
-    }
-    [data-testid="stFileUploader"] button {
-        background-color: #000 !important;
-        color: #00e5ff !important;
-        border: 1px solid #00e5ff !important;
-        font-weight: bold;
-    }
-
-    /* 2. SELECTBOX (MENYU) */
+    /* Neon Selectbox */
     div[data-baseweb="select"] > div {
         background-color: #000000 !important;
         border: 2px solid #00e5ff !important;
         box-shadow: 0 0 15px #00e5ff;
         border-radius: 10px;
     }
-    div[data-baseweb="select"] span {
-        color: #00e5ff !important;
-        text-shadow: 0 0 8px #00e5ff;
-        font-weight: bold;
-    }
-    div[role="listbox"] {
+    div[data-baseweb="select"] span { color: #00e5ff !important; text-shadow: 0 0 8px #00e5ff; font-weight: bold; }
+    div[role="listbox"] { background-color: #000 !important; border: 1px solid #00e5ff !important; }
+
+    /* Fayl yuklash qismi */
+    [data-testid="stFileUploader"] section {
         background-color: #000 !important;
-        border: 1px solid #00e5ff !important;
+        border: 2px dashed #00e5ff !important;
+        border-radius: 15px; padding: 20px;
+    }
+    [data-testid="stFileUploader"] span, [data-testid="stFileUploader"] div, [data-testid="stFileUploader"] small {
+        color: #00e5ff !important; text-shadow: 0 0 5px #00e5ff;
     }
 
-    /* 3. BARCHA TUGMALAR (BOSHLASH VA YUKLAB OLISH) */
+    /* Tugmalar dizayni */
     div.stButton > button, div.stDownloadButton > button {
         background-color: #000 !important;
         color: #00e5ff !important;
         border: 2px solid #00e5ff !important;
-        border-radius: 12px;
-        padding: 10px 25px;
-        font-size: 18px !important;
-        font-weight: bold;
-        width: 100%;
-        box-shadow: 0 0 15px #00e5ff;
-        transition: 0.3s;
+        border-radius: 12px; padding: 10px 25px;
+        font-size: 18px !important; font-weight: bold; width: 100%;
+        box-shadow: 0 0 15px #00e5ff; transition: 0.3s;
         text-transform: uppercase;
     }
     div.stButton > button:hover, div.stDownloadButton > button:hover {
-        background-color: #00e5ff !important;
-        color: #000 !important;
-        box-shadow: 0 0 35px #00e5ff;
+        background-color: #00e5ff !important; color: #000 !important; box-shadow: 0 0 35px #00e5ff;
     }
 
-    /* Player va boshqa detallar */
+    /* Player va Status */
     .neon-box { background: #050505; border: 2px solid #00e5ff; box-shadow: 0 0 25px rgba(0,229,255,0.4); border-radius: 20px; padding: 25px; margin-top: 25px; }
     .tg-status { background-color: #001a00; border: 1px solid #00ff00; color: #00ff00; padding: 10px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. NEON PLAYER CHIZISH ---
+# --- 3. NEON PLAYER CHIZISH (FAYLDAGI TIME LIPS O'CHIRILDI) ---
 def render_neon_player(audio_bytes, transcript_data):
     b64 = base64.b64encode(audio_bytes).decode()
     html = f"""
@@ -113,7 +98,8 @@ def render_neon_player(audio_bytes, transcript_data):
             const div = document.createElement('div');
             div.id = 'L-'+i;
             div.style.padding='15px'; div.style.borderBottom='1px solid #333'; div.style.cursor='pointer';
-            div.innerHTML = `<div style="font-size:20px; font-weight:bold; color:#777;">${{line.time}} | ${{line.text}}</div>` + (line.translated ? `<div style="font-size:16px; color:#555;">${{line.translated}}</div>` : '');
+            // TIME LIPS OLIB TASHLANDI, FAQAT MATN QOLDI:
+            div.innerHTML = `<div style="font-size:20px; font-weight:bold; color:#777;">${{line.text}}</div>` + (line.translated ? `<div style="font-size:16px; color:#555;">${{line.translated}}</div>` : '');
             div.onclick = () => {{ audio.currentTime = line.start; audio.play(); }};
             box.appendChild(div);
         }});
@@ -144,7 +130,6 @@ if uid_from_url:
 
 uploaded_file = st.file_uploader("MP3 fayl yuklang", type=['mp3', 'wav', 'ogg'])
 
-# --- NEON MENYU ---
 st.markdown("### 🌐 Tarjima tilini tanlang:")
 lang_options = ["🇺🇿 O'zbek", "🇷🇺 Rus", "🇬🇧 Ingliz", "📄 Original"]
 lang_choice = st.selectbox("", lang_options, index=3, label_visibility="collapsed")
@@ -158,9 +143,9 @@ if st.button("🚀 TAHLILNI BOSHLASH"):
                 model = whisper.load_model("base")
                 result = model.transcribe(temp_path)
                 
+                # TXT FAYL (TIME LIPS SAQLAB QOLINDI)
                 txt_full = f"TRANSKRIPSIYA\nFayl: {uploaded_file.name}\nSana: {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n\n"
                 player_data = []
-                
                 target_lang = {"🇺🇿 O'zbek": "uz", "🇷🇺 Rus": "ru", "🇬🇧 Ingliz": "en"}.get(lang_choice)
 
                 for s in result['segments']:
@@ -175,8 +160,6 @@ if st.button("🚀 TAHLILNI BOSHLASH"):
                 txt_full += f"\n---\n© Shodlik (Otavaliyev_M)\nO'zbekiston vaqti: {datetime.now(uz_tz).strftime('%H:%M:%S')}"
                 
                 render_neon_player(uploaded_file.getvalue(), player_data)
-                
-                # --- YUKLAB OLISH (NEON) ---
                 st.download_button("📄 TXT Yuklab olish", txt_full, file_name=f"{uploaded_file.name}.txt")
                 
                 if uid_from_url:
