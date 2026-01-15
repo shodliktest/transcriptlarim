@@ -4,7 +4,7 @@ from datetime import datetime
 from deep_translator import GoogleTranslator
 from groq import Groq
 
-# --- 1. SOZLAMALAR VA SECRETS ---
+# --- 1. SOZLAMALAR ---
 uz_tz = pytz.timezone('Asia/Tashkent')
 
 # Secrets orqali API kalitni chaqirish
@@ -17,13 +17,20 @@ except Exception:
 
 st.set_page_config(page_title="Neon Karaoke Pro", layout="centered")
 
-# --- 2. SIZNING ASLIY NEON DIZAYNINGIZ ---
+# --- 2. ASLIY NEON DIZAYN (PROGRESS BAR STILI BILAN) ---
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
     .stDeployButton {display:none;}
     .stApp { background-color: #000000 !important; color: white !important; }
     h1, h2, h3 { text-align: center; color: #fff; text-shadow: 0 0 10px #00e5ff, 0 0 20px #00e5ff; font-weight: bold; }
+
+    /* Neon Slider (Progress Bar) stili */
+    .stProgress > div > div > div > div {
+        background-color: #00e5ff !important;
+        box-shadow: 0 0 15px #00e5ff, 0 0 30px #00e5ff;
+    }
+    .stProgress { height: 10px !important; }
 
     /* Neon Selectbox */
     div[data-baseweb="select"] > div {
@@ -43,12 +50,12 @@ st.markdown("""
         border-radius: 12px;
         font-weight: bold;
         width: 100%;
-        transition: 0.3s;
         text-transform: uppercase;
+        transition: 0.3s;
     }
     div.stButton > button:hover { background-color: #00e5ff !important; color: #000 !important; box-shadow: 0 0 35px #00e5ff; }
 
-    /* Fayl yuklash oynasi */
+    /* Fayl yuklash */
     [data-testid="stFileUploader"] section { background-color: #000 !important; border: 2px dashed #00e5ff !important; border-radius: 15px; }
     
     /* Neon Player Box */
@@ -56,13 +63,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. NEON PLAYER (TIME-LIPS YO'Q, FAQAT MATN) ---
+# --- 3. NEON PLAYER KOMPONENTI ---
 def render_neon_player(audio_bytes, transcript_data):
     b64 = base64.b64encode(audio_bytes).decode()
     transcript_json = json.dumps(transcript_data)
     html = f"""
     <div class="neon-box">
-        <h3 style="text-align:center; color:#00e5ff; margin-bottom:15px;">🎵 NEON KARAOKE PLAYER 🎵</h3>
+        <h3 style="text-align:center; color:#00e5ff; text-shadow: 0 0 10px #00e5ff;">🎵 NEON KARAOKE PLAYER 🎵</h3>
         <audio id="player" controls style="width:100%; filter:invert(1) drop-shadow(0 0 8px #00e5ff); margin-bottom:15px;">
             <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
@@ -110,46 +117,57 @@ lang = st.selectbox("Tarjima tilini tanlang:", ["🇺🇿 O'zbek", "🇷🇺 Rus
 
 if st.button("🚀 TAHLILNI BOSHLASH") and up:
     path = f"tmp_{time.time()}.mp3"
+    # Kutish vaqtida dizayn uchun slider va status xabarlari
+    status_text = st.empty()
+    progress_bar = st.progress(0)
+    
     try:
-        with st.spinner("⚡ Groq API orqali o'ta tezkor tahlil qilinmoqda..."):
-            # Faylni saqlash
-            with open(path, "wb") as f: f.write(up.getbuffer())
-            
-            # Groq API call (Whisper-Large-V3-Turbo)
-            with open(path, "rb") as file:
-                transcription = client.audio.transcriptions.create(
-                    file=(path, file.read()),
-                    model="whisper-large-v3-turbo",
-                    response_format="verbose_json",
-                )
-            
-            p_data = []
-            txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
-            t_code = {"🇺🇿 O'zbek":"uz","🇷🇺 Rus":"ru","🇬🇧 Ingliz":"en"}.get(lang)
+        # 1-bosqich
+        status_text.markdown("<p style='color:#00e5ff; text-align:center;'>⏳ Fayl yuklanmoqda...</p>", unsafe_allow_html=True)
+        with open(path, "wb") as f: f.write(up.getbuffer())
+        progress_bar.progress(25)
+        
+        # 2-bosqich
+        status_text.markdown("<p style='color:#00e5ff; text-align:center;'>⚡ AI tahlil qilmoqda (Groq API)...</p>", unsafe_allow_html=True)
+        with open(path, "rb") as file:
+            transcription = client.audio.transcriptions.create(
+                file=(path, file.read()),
+                model="whisper-large-v3-turbo",
+                response_format="verbose_json",
+            )
+        progress_bar.progress(75)
+        
+        # 3-bosqich
+        status_text.markdown("<p style='color:#00e5ff; text-align:center;'>🌐 Matnlar tayyorlanmoqda...</p>", unsafe_allow_html=True)
+        p_data = []
+        txt_out = f"📄 TRANSKRIPSIYA: {up.name}\n📅 {datetime.now(uz_tz).strftime('%Y-%m-%d %H:%M')}\n---\n\n"
+        t_code = {"🇺🇿 O'zbek":"uz","🇷🇺 Rus":"ru","🇬🇧 Ingliz":"en"}.get(lang)
 
-            for s in transcription.segments:
-                orig_text = s['text'].strip()
-                # Tarjima jarayoni
-                tr = GoogleTranslator(source='auto', target=t_code).translate(orig_text) if t_code else None
-                
-                # Player uchun ma'lumotlar (Time-lips-siz UI uchun)
-                p_data.append({"start": s['start'], "end": s['end'], "text": orig_text, "translated": tr})
-                
-                # TXT fayl uchun vaqtlar bilan saqlash
-                tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
-                txt_out += f"{tm} {orig_text}\n" + (f"Tarjima: {tr}\n" if tr else "") + "\n"
-
-            # PECHAT / IMZO
-            txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M) | 🤖 Neon Pro Web | ⏰ {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
+        for s in transcription.segments:
+            orig_text = s['text'].strip()
+            tr = GoogleTranslator(source='auto', target=t_code).translate(orig_text) if t_code else None
+            p_data.append({"start": s['start'], "end": s['end'], "text": orig_text, "translated": tr})
             
-            # NATIJANI CHIQARISH
-            render_neon_player(up.getvalue(), p_data)
-            st.download_button("📄 TXT FAYLNI YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
+            tm = f"[{int(s['start']//60):02d}:{int(s['start']%60):02d}]"
+            txt_out += f"{tm} {orig_text}\n" + (f"Tarjima: {tr}\n" if tr else "") + "\n"
+
+        progress_bar.progress(100)
+        status_text.success("✅ Tahlil yakunlandi!")
+        
+        # Imzo
+        txt_out += f"\n---\n👤 Shodlik (Otavaliyev_M) | 🤖 Neon Pro Web | ⏰ {datetime.now(uz_tz).strftime('%H:%M:%S')} (UZB)"
+
+        # Natijalarni ko'rsatish
+        render_neon_player(up.getvalue(), p_data)
+        st.download_button("📄 TXT FAYLNI YUKLAB OLISH", txt_out, file_name=f"{up.name}.txt")
 
     except Exception as e:
         st.error(f"Xatolik yuz berdi: {e}")
     finally:
-        # AUTO-CLEAR: Vaqtinchalik faylni darhol o'chirish
+        # Progress bar va statusni bir ozdan keyin tozalash
+        time.sleep(1)
+        status_text.empty()
+        progress_bar.empty()
         if os.path.exists(path):
             os.remove(path)
 
