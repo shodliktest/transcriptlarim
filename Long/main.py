@@ -113,17 +113,21 @@ async def lookup(m: types.Message):
     await wait.delete()
     await m.answer(result)
 
-# --- 6. SINGLE THREAD RUNNER ---
+# --- 6. SINGLE THREAD RUNNER (FIXED) ---
 @st.cache_resource
 def start_bot_process():
     def _run():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(dp.start_polling(bot))
+        
+        # MUHIM: handle_signals=False qo'shildi. 
+        # Bu Aiogram'ga asosiy oqimdan tashqarida ishlayotganini bildiradi.
+        loop.run_until_complete(dp.start_polling(bot, handle_signals=False))
     
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
     return thread
+
 
 # --- 7. STREAMLIT INTERFACE ---
 st.set_page_config(page_title="Longman Bot Server", page_icon="📕")
@@ -148,3 +152,4 @@ if os.path.exists(Config.USERS_DB):
 
 if st.button("Serverni yangilash (Rerun)"):
     st.rerun()
+
