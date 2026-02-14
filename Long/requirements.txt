@@ -1,3 +1,4 @@
+Pillow
 streamlit
 aiogram
 beautifulsoup4
@@ -5,3 +6,4 @@ requests
 pytz
 lxml
 gTTS
+
