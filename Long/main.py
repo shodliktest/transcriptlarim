@@ -21,8 +21,9 @@ class Config:
     try:
         BOT_TOKEN = st.secrets["BOT_TOKEN"]
     except:
-        st.error("❌ Secrets bo'limida BOT_TOKEN topilmadi!")
+        st.error("❌ Secrets'da BOT_TOKEN topilmadi!")
         st.stop()
+    # Pixabay API kalitingizni bu yerga kiriting
     PIXABAY_KEY = st.secrets.get("PIXABAY_KEY", "")
     HISTORY_DB = "history_db.json"
 
@@ -53,11 +54,11 @@ def get_pixabay_img(query):
     except: return None
     return None
 
-# --- 3. MERGED MULTIMEDIA SCRAPER ---
+# --- 3. MUKAMMAL MULTIMEDIA SKRAPER ---
 def scrape_longman_full(word):
     try:
         url = f"https://www.ldoceonline.com/dictionary/{word.lower().strip().replace(' ', '-')}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code != 200: return None
 
@@ -67,15 +68,27 @@ def scrape_longman_full(word):
 
         merged = {}
         for entry in entries:
-            pos = entry.find('span', class_='POS').text.strip().upper() if entry.find('span', class_='POS') else "WORD"
+            pos_tag = entry.find('span', class_='POS')
+            pos = pos_tag.text.strip().upper() if pos_tag else "WORD"
             if "PhrVbEntry" in entry.get('class', []): pos = "PHRASAL VERB"
             
-            # Audio va Rasm linklari
+            # 1. Rasm qidirish
             img_tag = entry.find('img', class_='thumb')
-            img = f"https://www.ldoceonline.com{img_tag['src']}" if img_tag else None
+            img = None
+            if img_tag:
+                img = img_tag['src']
+                if not img.startswith('http'):
+                    img = f"https://www.ldoceonline.com{img}"
             
+            # 2. Audio qidirish (UK/US)
             audios = entry.find_all('span', attrs={'data-src-mp3': True})
-            audio_url = audios[0]['data-src-mp3'] if audios else None
+            audio_url = None
+            for a in audios:
+                src = a['data-src-mp3']
+                if "breProns" in src or "British" in a.get('title', ''):
+                    audio_url = src # Britaniya talaffuzi ustun
+                    break
+            if not audio_url and audios: audio_url = audios[0]['data-src-mp3']
 
             if pos not in merged:
                 merged[pos] = {
@@ -88,18 +101,23 @@ def scrape_longman_full(word):
             for b in blocks:
                 definition = b.find('span', class_='DEF')
                 if not definition: continue
+                
+                # Soddalashtirilgan ta'rif (AI Explain uchun tayyorlov)
+                full_def = definition.text.strip()
+                short_def = full_def.split(';')[0].split('.')[0] # Birinchi qism
+                
                 merged[pos]["senses"].append({
                     "signpost": b.find('span', class_='SIGNPOST').text.strip().upper() if b.find('span', class_='SIGNPOST') else "",
                     "lex": b.find('span', class_='LEXUNIT').text.strip() if b.find('span', class_='LEXUNIT') else "",
-                    "def": definition.text.strip(),
+                    "def": full_def,
+                    "short": short_def,
                     "exs": [ex.text.strip() for ex in b.find_all('span', class_='EXAMPLE')]
                 })
         return merged
     except: return None
 
-# --- 4. FORMATLASH (CLICK-TO-COPY) ---
-def format_message(pos, data):
-    # Sarlavha nusxalanmaydi, ta'rif <code> ichida nusxalanadi
+# --- 4. FORMATLASH (NUSXALASH VA AI EXPLAIN) ---
+def format_message(pos, data, simplified=False):
     res = f"📕 <b>{data['word'].upper()}</b> [{pos}]\n"
     if data['pron']: res += f"🗣 /{data['pron']}/\n"
     res += "━━━━━━━━━━━━━━━\n\n"
@@ -107,14 +125,19 @@ def format_message(pos, data):
     for i, s in enumerate(data['senses'], 1):
         sign = f"<u>{s['signpost']}</u> " if s['signpost'] else ""
         lex = f"<b>{s['lex']}</b> " if s['lex'] else ""
-        # FAQAT TA'RIF NUSXALANADI
-        res += f"<b>{i}.</b> {sign}{lex}<code>{s['def']}</code>\n"
-        for ex in s['exs']:
-            res += f"  • <i>{ex}</i>\n"
+        
+        # NUSXALANADIGAN QISM (<code> ichida)
+        def_text = s['short'] if simplified else s['def']
+        res += f"<b>{i}.</b> {sign}{lex}<code>{def_text}</code>\n"
+        
+        # Misollar nusxalanmasligi uchun oddiy matnda
+        if not simplified:
+            for ex in s['exs']:
+                res += f"  • <i>{ex}</i>\n"
         res += "\n"
     return res
 
-# --- 5. BOT HANDLERLARI ---
+# --- 5. HANDLERLAR ---
 def register_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def cmd_start(m: types.Message):
@@ -124,12 +147,12 @@ def register_handlers(dp: Dispatcher):
 
     @dp.message(F.text == "📜 Tarix")
     async def show_history(m: types.Message):
-        db = Config.HISTORY_DB
-        if not os.path.exists(db): return await m.answer("Tarix bo'sh.")
-        with open(db, "r") as f: data = json.load(f)
+        if not os.path.exists(Config.HISTORY_DB): return await m.answer("Tarix bo'sh.")
+        with open(Config.HISTORY_DB, "r") as f:
+            try: data = json.load(f)
+            except: data = {}
         u_history = data.get(str(m.from_user.id), [])
         if not u_history: return await m.answer("Tarix bo'sh.")
-        
         kb = InlineKeyboardBuilder()
         for word in u_history: kb.button(text=word, callback_data=f"h_{word}")
         kb.adjust(2)
@@ -173,32 +196,27 @@ def register_handlers(dp: Dispatcher):
                 try: await call.message.answer_voice(content['audio'])
                 except: pass
             else:
-                # TTS
                 tts = gTTS(text=content['word'], lang='en')
                 buf = io.BytesIO()
                 tts.write_to_fp(buf)
                 buf.seek(0)
                 await call.message.answer_voice(types.BufferedInputFile(buf.read(), filename="pron.mp3"))
 
-            await call.message.answer(format_message(choice, content))
+            # 3. Matn va AI tugmasi
+            kb = InlineKeyboardBuilder()
+            kb.button(text="🤖 AI Explain (Sodda)", callback_data=f"ai_{choice}")
+            await call.message.answer(format_message(choice, content), reply_markup=kb.as_markup())
         else:
-            # All rejimi
             for pos, content in data.items():
                 await call.message.answer(format_message(pos, content))
         await call.answer()
 
-    @dp.callback_query(F.data.startswith("h_"))
-    async def history_search(call: types.CallbackQuery):
-        word = call.data.replace("h_", "")
-        await call.message.answer(f"Qidirilmoqda: {word}")
-        # handle_word mantiqi bu yerda takrorlanadi
-        data = await asyncio.to_thread(scrape_longman_full, word)
-        if data:
-            TEMP_CACHE[call.message.chat.id] = data
-            kb = InlineKeyboardBuilder()
-            for pos in data.keys(): kb.button(text=pos, callback_data=f"v_{pos}")
-            kb.adjust(2)
-            await call.message.answer(f"📦 {word.upper()}:", reply_markup=kb.as_markup())
+    @dp.callback_query(F.data.startswith("ai_"))
+    async def process_ai(call: types.CallbackQuery):
+        pos = call.data.replace("ai_", "")
+        data = TEMP_CACHE.get(call.message.chat.id)
+        if data and pos in data:
+            await call.message.answer(f"🤖 <b>AI soddalashtirilgan ma'nosi:</b>\n\n{format_message(pos, data[pos], True)}")
         await call.answer()
 
 # --- 6. RUNNER ---
@@ -219,4 +237,4 @@ def start_bot():
 st.title("📕 Longman Spectrum Pro")
 start_bot()
 st.success("Bot Online!")
-    
+                
