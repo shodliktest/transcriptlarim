@@ -69,21 +69,71 @@ def log_user(user: types.User):
         users.append({"id": user.id, "name": user.full_name, "username": f"@{user.username}" if user.username else "N/A", "date": get_now()})
         with open(Config.USERS_DB, "w") as f: json.dump(users, f, indent=4)
 
-# --- 4. RESOURCE CACHING & WEBHOOK KILLER ---
+# --- 4. RESOURCE CACHING (FAQAT MODEL UCHUN) ---
 @st.cache_resource
-def load_bot():
-    bot = Bot(token=Config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
-    
-    # Webhook Killer
-    async def clear_webhook():
-        await bot.delete_webhook(drop_pending_updates=True)
-    
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(clear_webhook())
-    return bot, dp
+def load_whisper():
+    # Agar keyinchalik Whisper kerak bo'lsa, bu yerda yuklanadi
+    return None 
 
-bot, dp = load_bot()
+# --- 5. HANDLERLARNI RO'YXATGA OLISH FUNKSIYASI ---
+def register_handlers(dp: Dispatcher):
+    @dp.message(Command("start"))
+    async def cmd_start(m: types.Message):
+        log_user(m.from_user)
+        kb = ReplyKeyboardBuilder()
+        kb.button(text="🔍 Lug'atdan qidirish")
+        await m.answer(f"Salom {m.from_user.first_name}!\nInglizcha so'z yuboring.", 
+                       reply_markup=kb.as_markup(resize_keyboard=True))
+
+    @dp.message(F.text == "🔍 Lug'atdan qidirish")
+    async def ask_word(m: types.Message):
+        await m.answer("So'zni kiriting:")
+
+    @dp.message(F.text)
+    async def lookup(m: types.Message):
+        if m.text.startswith('/'): return
+        word = m.text.strip()
+        wait = await m.answer("🔍 Longmandan qidirilmoqda...")
+        result = await asyncio.to_thread(scrape_longman, word)
+        await wait.delete()
+        await m.answer(result, parse_mode="HTML")
+
+# --- 6. SINGLE THREAD RUNNER (MUKAMMAL VARIANTS) ---
+@st.cache_resource
+def start_bot_process():
+    def _run():
+        async def main_bot():
+            # Bot va Dispatcher aynan shu loop ichida yaratilishi shart!
+            bot_instance = Bot(
+                token=Config.BOT_TOKEN, 
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+            )
+            dp_instance = Dispatcher()
+            
+            # Handlerlarni ulash
+            register_handlers(dp_instance)
+            
+            # Webhooklarni tozalash va Pollingni boshlash
+            await bot_instance.delete_webhook(drop_pending_updates=True)
+            try:
+                # handle_signals=False — Thread ichida ishlash uchun majburiy
+                await dp_instance.start_polling(bot_instance, handle_signals=False)
+            finally:
+                # Sessiyani to'g'ri yopish
+                await bot_instance.session.close()
+
+        # Yangi loop yaratish va botni Task sifatida ishga tushirish
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main_bot())
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return thread
+
+# Botni ishga tushirish
+bot_thread = start_bot_process()
+
 
 # --- 5. TELEGRAM HANDLERS ---
 @dp.message(Command("start"))
@@ -152,4 +202,5 @@ if os.path.exists(Config.USERS_DB):
 
 if st.button("Serverni yangilash (Rerun)"):
     st.rerun()
+
 
