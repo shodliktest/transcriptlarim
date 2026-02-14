@@ -10,13 +10,21 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# --- 1. CONFIG ---
-class Config:
-    BOT_TOKEN = st.secrets["BOT_TOKEN"]
+# --- 1. CONFIG (XATOLIKLARNI OLDINI OLISH) ---
+st.set_page_config(page_title="Longman AI Dictionary", page_icon="📕")
 
+class Config:
+    # Secrets mavjudligini tekshirish (Oq ekran bo'lmasligi uchun)
+    try:
+        BOT_TOKEN = st.secrets["BOT_TOKEN"]
+    except Exception:
+        st.error("❌ BOT_TOKEN topilmadi! Streamlit Secrets bo'limiga tokenni kiriting.")
+        st.stop()
+
+# Thread-safe global kesh
 TEMP_CACHE = {}
 
-# --- 2. OPTIMALLASHTIRILGAN SKRAPER ---
+# --- 2. MUKAMMAL VA BIRLASHTIRILGAN SKRAPER ---
 def scrape_longman_merged(word):
     try:
         formatted_word = word.lower().strip().replace(' ', '-')
@@ -29,14 +37,15 @@ def scrape_longman_merged(word):
         entries = soup.find_all('span', class_='dictentry')
         if not entries: return None
 
-        # Ma'lumotlarni turkum bo'yicha guruhlash uchun lug'at
+        # Ma'lumotlarni turkumlar (NOUN, VERB) bo'yicha guruhlash
         merged_data = {}
         
         for entry in entries:
+            # Turkumni aniqlash
             pos_tag = entry.find('span', class_='POS')
             pos_text = pos_tag.text.strip().upper() if pos_tag else "OTHER"
             
-            # Agar bu Phrasal Verb bo'lsa, turkumni o'zgartiramiz
+            # Agar bu Phrasal Verb bo'lsa
             if "PhrVbEntry" in entry.get('class', []):
                 pos_text = "PHRASAL VERB"
 
@@ -45,12 +54,9 @@ def scrape_longman_merged(word):
             pron_tag = entry.find('span', class_='PRON')
             pron = pron_tag.text if pron_tag else ""
 
+            # Agar bu turkum hali lug'atda bo'lmasa, ochamiz
             if pos_text not in merged_data:
-                merged_data[pos_text] = {
-                    "word": hwd,
-                    "pron": pron,
-                    "entries": []
-                }
+                merged_data[pos_text] = {"word": hwd, "pron": pron, "entries": []}
 
             senses_data = []
             blocks = entry.find_all(['span'], class_=['Sense', 'PhrVbEntry'])
@@ -59,7 +65,6 @@ def scrape_longman_merged(word):
                 definition = b.find('span', class_='DEF')
                 lexunit = b.find('span', class_='LEXUNIT')
                 head_pv = b.find('span', class_='Head')
-                
                 if not definition and not lexunit and not head_pv: continue
 
                 sub_senses = []
@@ -93,19 +98,18 @@ def scrape_longman_merged(word):
                 merged_data[pos_text]["entries"].append(senses_data)
         
         return merged_data
-    except Exception:
-        return None
+    except: return None
 
-# --- 3. FORMATLASH (BIRLASHTIRILGAN) ---
+# --- 3. FORMATLASH (RAQAM VA MA'NO BIR QATORDA) ---
 def format_merged_style(pos, content):
     res = f"📕 <b>{content['word'].upper()}</b> [{pos}]\n"
-    if content['pron']:
-        res += f"🗣 /{content['pron']}/\n"
+    if content['pron']: res += f"🗣 /{content['pron']}/\n"
     res += "━━━━━━━━━━━━━━━\n\n"
     
     global_counter = 1
     for entry_senses in content['entries']:
         for s in entry_senses:
+            # Raqam yonidan ma'noni chiqarish
             line_start = f"<b>{global_counter}.</b> "
             extra = ""
             if s['signpost']: extra += f"<u>{s['signpost']}</u> "
@@ -128,6 +132,10 @@ def format_merged_style(pos, content):
 
 # --- 4. BOT HANDLERLARI ---
 def register_handlers(dp: Dispatcher):
+    @dp.message(Command("start"))
+    async def cmd_start(m: types.Message):
+        await m.answer(f"👋 Salom {m.from_user.first_name}! Longman AI Dictionary'ga xush kelibsiz.")
+
     @dp.message(F.text)
     async def handle_word(m: types.Message):
         if m.text.startswith('/'): return
@@ -136,12 +144,10 @@ def register_handlers(dp: Dispatcher):
         data = await asyncio.to_thread(scrape_longman_merged, word)
         await wait.delete()
 
-        if not data:
-            return await m.answer("❌ So'z topilmadi.")
+        if not data: return await m.answer("❌ So'z topilmadi.")
 
         TEMP_CACHE[m.chat.id] = data
         kb = InlineKeyboardBuilder()
-        # Endi har bir turkum uchun faqat bitta tugma chiqadi
         for pos in data.keys():
             kb.button(text=pos, callback_data=f"v_{pos}")
         if len(data) > 1: kb.button(text="📚 All", callback_data="v_all")
@@ -150,8 +156,9 @@ def register_handlers(dp: Dispatcher):
 
     @dp.callback_query(F.data.startswith("v_"))
     async def process_view(call: types.CallbackQuery):
+        chat_id = call.message.chat.id
         choice = call.data.replace("v_", "")
-        data = TEMP_CACHE.get(call.message.chat.id)
+        data = TEMP_CACHE.get(chat_id)
         if not data: return await call.answer("Qayta qidiring.")
 
         final_msg = ""
@@ -162,9 +169,31 @@ def register_handlers(dp: Dispatcher):
             final_msg = format_merged_style(choice, data[choice])
 
         if len(final_msg) > 4000:
-            for i in range(0, len(final_msg), 4000): 
-                await call.message.answer(final_msg[i:i+4000])
-        else: 
-            await call.message.answer(final_msg)
+            for i in range(0, len(final_msg), 4000): await call.message.answer(final_msg[i:i+4000])
+        else: await call.message.answer(final_msg)
         await call.answer()
-                      
+
+# --- 5. RUNNER (XAVFSIZ START) ---
+@st.cache_resource
+def start_bot_app():
+    def _run():
+        async def main():
+            bot = Bot(token=Config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+            dp = Dispatcher()
+            register_handlers(dp)
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot, handle_signals=False)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
+    
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return thread
+
+# --- 6. UI ---
+st.title("📕 Longman AI Dictionary")
+start_bot_app()
+st.success("✅ Bot Online holatda!")
+st.info("So'z qidirilsa, barcha turkumlar birlashtirib ko'rsatiladi.")
