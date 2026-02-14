@@ -14,7 +14,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# --- 1. SINGLE CONFIGURATION ---
+# --- 1. KONFIGURATSIYA ---
 class Config:
     ADMIN_ID = 1416457518
     USERS_DB = "user_database.json"
@@ -24,7 +24,7 @@ class Config:
 def get_now():
     return datetime.now(Config.TZ).strftime('%Y.%m.%d %H:%M:%S')
 
-# --- 2. LONGMAN SCRAPER (MUKAMMAL) ---
+# --- 2. LONGMAN LUG'ATI SCRAPERI ---
 def scrape_longman(word):
     try:
         url = f"https://www.ldoceonline.com/dictionary/{word.lower().strip()}"
@@ -32,13 +32,13 @@ def scrape_longman(word):
         res = requests.get(url, headers=headers, timeout=10)
         
         if res.status_code != 200:
-            return "❌ So'z topilmadi yoki Longman saytida texnik ishlar ketmoqda."
+            return "❌ Kechirasiz, so'z topilmadi yoki Longman bilan bog'lanishda xatolik."
 
         soup = BeautifulSoup(res.text, 'lxml')
         entry = soup.find('span', class_='dictentry')
         
         if not entry:
-            return "❌ Kechirasiz, Longman lug'atidan bunday so'z topilmadi."
+            return "❌ Bunday so'z Longman lug'atidan topilmadi. Iltimos, so'zning to'g'ri yozilganini tekshiring."
 
         # Ma'lumotlarni yig'ish
         hwd = entry.find('span', class_='HWD').text if entry.find('span', class_='HWD') else word
@@ -56,9 +56,9 @@ def scrape_longman(word):
         
         return response
     except Exception as e:
-        return f"⚠️ Xatolik: {str(e)}"
+        return f"⚠️ Xatolik yuz berdi: {str(e)}"
 
-# --- 3. DATABASE LOGIC ---
+# --- 3. FOYDALANUVCHILARNI RO'YXATGA OLISH ---
 def log_user(user: types.User):
     if not os.path.exists(Config.USERS_DB):
         with open(Config.USERS_DB, "w") as f: json.dump([], f)
@@ -66,141 +66,106 @@ def log_user(user: types.User):
         try: users = json.load(f)
         except: users = []
     if not any(u['id'] == user.id for u in users):
-        users.append({"id": user.id, "name": user.full_name, "username": f"@{user.username}" if user.username else "N/A", "date": get_now()})
+        users.append({
+            "id": user.id, 
+            "name": user.full_name, 
+            "username": f"@{user.username}" if user.username else "N/A", 
+            "date": get_now()
+        })
         with open(Config.USERS_DB, "w") as f: json.dump(users, f, indent=4)
 
-# --- 4. RESOURCE CACHING (FAQAT MODEL UCHUN) ---
-@st.cache_resource
-def load_whisper():
-    # Agar keyinchalik Whisper kerak bo'lsa, bu yerda yuklanadi
-    return None 
-
-# --- 5. HANDLERLARNI RO'YXATGA OLISH FUNKSIYASI ---
-def register_handlers(dp: Dispatcher):
+# --- 4. HANDLERLARNI RO'YXATGA OLISH ---
+def register_all_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def cmd_start(m: types.Message):
         log_user(m.from_user)
+        
+        welcome_text = (
+            f"👋 <b>Assalomu alaykum, {m.from_user.first_name}!</b>\n\n"
+            f"🤖 Men <b>Longman Dictionary Bot</b>man.\n\n"
+            f"📚 <b>Nima qila olaman?</b>\n"
+            f"• Inglizcha so'zlarning <b>mukammal ta'rifini</b> topib beraman.\n"
+            f"• So'zlarning <b>transkripsiyasini</b> ko'rsataman.\n"
+            f"• Gap ichida ishlatilishiga <b>misollar</b> keltiraman.\n\n"
+            f"✍️ Shunchaki menga biror inglizcha so'z yuboring!"
+        )
+        
         kb = ReplyKeyboardBuilder()
         kb.button(text="🔍 Lug'atdan qidirish")
-        await m.answer(f"Salom {m.from_user.first_name}!\nInglizcha so'z yuboring.", 
-                       reply_markup=kb.as_markup(resize_keyboard=True))
+        await m.answer(welcome_text, reply_markup=kb.as_markup(resize_keyboard=True))
 
     @dp.message(F.text == "🔍 Lug'atdan qidirish")
-    async def ask_word(m: types.Message):
-        await m.answer("So'zni kiriting:")
+    async def help_lookup(m: types.Message):
+        await m.answer("📝 Iltimos, qidirayotgan so'zingizni yuboring:")
 
     @dp.message(F.text)
-    async def lookup(m: types.Message):
+    async def handle_message(m: types.Message):
         if m.text.startswith('/'): return
+        
         word = m.text.strip()
-        wait = await m.answer("🔍 Longmandan qidirilmoqda...")
+        # Bir nechta so'z bo'lsa (gap bo'lsa) lug'at qidirmaymiz
+        if len(word.split()) > 2:
+            await m.answer("⚠️ Iltimos, faqat bitta so'z yuboring. Men lug'at botiman, tarjimon emas.")
+            return
+
+        wait = await m.answer("🔍 <b>Longman</b> kutubxonasidan qidirilmoqda...")
+        # Scraperni alohida thread'da ishga tushiramiz (bot qotib qolmasligi uchun)
         result = await asyncio.to_thread(scrape_longman, word)
         await wait.delete()
-        await m.answer(result, parse_mode="HTML")
+        await m.answer(result)
 
-# --- 6. SINGLE THREAD RUNNER (MUKAMMAL VARIANTS) ---
+# --- 5. BOT RUNNER (THREADING & ASYNCIO) ---
 @st.cache_resource
 def start_bot_process():
-    def _run():
+    def _run_in_thread():
         async def main_bot():
-            # Bot va Dispatcher aynan shu loop ichida yaratilishi shart!
-            bot_instance = Bot(
+            # Bot va Dispatcher aynan shu loop ichida yaratilishi shart (aiohttp qoidasi)
+            bot_obj = Bot(
                 token=Config.BOT_TOKEN, 
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML)
             )
-            dp_instance = Dispatcher()
+            dp_obj = Dispatcher()
             
-            # Handlerlarni ulash
-            register_handlers(dp_instance)
+            register_all_handlers(dp_obj)
             
-            # Webhooklarni tozalash va Pollingni boshlash
-            await bot_instance.delete_webhook(drop_pending_updates=True)
+            # Webhooklarni tozalash
+            await bot_obj.delete_webhook(drop_pending_updates=True)
+            
             try:
                 # handle_signals=False — Thread ichida ishlash uchun majburiy
-                await dp_instance.start_polling(bot_instance, handle_signals=False)
+                await dp_obj.start_polling(bot_obj, handle_signals=False)
             finally:
-                # Sessiyani to'g'ri yopish
-                await bot_instance.session.close()
+                await bot_obj.session.close()
 
-        # Yangi loop yaratish va botni Task sifatida ishga tushirish
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(main_bot())
 
-    thread = threading.Thread(target=_run, daemon=True)
+    thread = threading.Thread(target=_run_in_thread, daemon=True)
     thread.start()
     return thread
 
-# Botni ishga tushirish
-bot_thread = start_bot_process()
-
-
-# --- 5. TELEGRAM HANDLERS ---
-@dp.message(Command("start"))
-async def cmd_start(m: types.Message):
-    log_user(m.from_user)
-    kb = ReplyKeyboardBuilder()
-    kb.button(text="🔍 Lug'atdan qidirish")
-    await m.answer(f"Salom {m.from_user.first_name}!\nInglizcha so'z yuboring, men uni Longmandan topib beraman.", 
-                   reply_markup=kb.as_markup(resize_keyboard=True))
-
-@dp.message(F.text == "🔍 Lug'atdan qidirish")
-async def ask_word(m: types.Message):
-    await m.answer("So'zni kiriting (masalan: <i>success</i>):")
-
-@dp.message(F.text)
-async def lookup(m: types.Message):
-    if m.text.startswith('/'): return
-    
-    # Faqat bitta so'z ekanligini tekshirish (lug'at uchun)
-    word = m.text.strip()
-    if len(word.split()) > 2:
-        await m.answer("Iltimos, faqat bitta so'z yuboring.")
-        return
-
-    wait = await m.answer("🔍 Longmandan qidirilmoqda...")
-    result = await asyncio.to_thread(scrape_longman, word)
-    await wait.delete()
-    await m.answer(result)
-
-# --- 6. SINGLE THREAD RUNNER (FIXED) ---
-@st.cache_resource
-def start_bot_process():
-    def _run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # MUHIM: handle_signals=False qo'shildi. 
-        # Bu Aiogram'ga asosiy oqimdan tashqarida ishlayotganini bildiradi.
-        loop.run_until_complete(dp.start_polling(bot, handle_signals=False))
-    
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    return thread
-
-
-# --- 7. STREAMLIT INTERFACE ---
-st.set_page_config(page_title="Longman Bot Server", page_icon="📕")
-st.title("📕 Longman Dictionary Bot")
+# --- 6. STREAMLIT INTERFACE ---
+st.set_page_config(page_title="Longman Server", page_icon="📕")
+st.title("📕 Longman Bot Server Control")
 
 # Botni fonda ishga tushirish
 bot_thread = start_bot_process()
 
-st.success("✅ Bot serverda muvaffaqiyatli ishga tushdi.")
+st.success("🤖 Bot Online holatda!")
+st.info("Bu server Longman Dictionary API vazifasini bajarmoqda.")
 
 # Statistika bo'limi
 if os.path.exists(Config.USERS_DB):
     with open(Config.USERS_DB, "r") as f:
-        data = json.load(f)
+        users_data = json.load(f)
     
     col1, col2 = st.columns(2)
-    col1.metric("Foydalanuvchilar", len(data))
-    col2.info("Server: Online")
+    col1.metric("Foydalanuvchilar", len(users_data))
+    col2.metric("Server Status", "Aktiv")
     
-    st.write("### Oxirgi foydalanuvchilar")
-    st.dataframe(data[-10:]) # Oxirgi 10 tasini ko'rsatish
+    st.write("### Oxirgi 5 ta foydalanuvchi")
+    st.table(users_data[-5:])
 
-if st.button("Serverni yangilash (Rerun)"):
+if st.button("🔄 Serverni yangilash"):
     st.rerun()
-
-
