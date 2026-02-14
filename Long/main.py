@@ -13,7 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 # --- 1. KONFIGURATSIYA ---
-st.set_page_config(page_title="Longman Ultimate Edition", layout="centered")
+st.set_page_config(page_title="Longman Ultimate Pro", layout="centered")
 
 class Config:
     try:
@@ -21,9 +21,9 @@ class Config:
     except:
         st.error("❌ Secrets'da BOT_TOKEN topilmadi!")
         st.stop()
-    DB_FILE = "user_settings_v9.json"
+    DB_FILE = "user_settings_v10.json"
 
-# Foydalanuvchi sozlamalari va tarixini yuklash
+# Foydalanuvchi ma'lumotlarini boshqarish
 def get_user_data(user_id):
     if not os.path.exists(Config.DB_FILE):
         return {"history": [], "show_examples": True, "show_translation": False}
@@ -53,7 +53,7 @@ def translate_to_uz(text):
 
 TEMP_CACHE = {}
 
-# --- 2. PROFESSIONAL SKRAPER (TO'LIQ MA'LUMOTLAR BILAN) ---
+# --- 2. PROFESSIONAL SKRAPER (BO'SH JOYLAR TUZATILGAN) ---
 def scrape_longman_ultimate(word):
     try:
         url = f"https://www.ldoceonline.com/dictionary/{word.lower().strip().replace(' ', '-')}"
@@ -68,25 +68,24 @@ def scrape_longman_ultimate(word):
         merged = {}
         for entry in entries:
             pos_tag = entry.find('span', class_='POS')
-            pos = pos_tag.text.strip().upper() if pos_tag else "WORD"
+            pos = pos_tag.get_text(separator=" ", strip=True).upper() if pos_tag else "WORD"
             if "PhrVbEntry" in entry.get('class', []): pos = "PHRASAL VERB"
             
-            hwd = entry.find('span', class_='HWD').text if entry.find('span', class_='HWD') else word
-            pron = entry.find('span', class_='PRON').text if entry.find('span', class_='PRON') else ""
+            hwd = entry.find('span', class_='HWD').get_text(separator=" ", strip=True) if entry.find('span', class_='HWD') else word
+            pron = entry.find('span', class_='PRON').get_text(separator=" ", strip=True) if entry.find('span', class_='PRON') else ""
 
             if pos not in merged:
                 merged[pos] = {"word": hwd, "pron": pron, "data": []}
 
-            # Barcha Sense va Phrasal Verb bloklarini titkilaymiz
             blocks = entry.find_all(['span'], class_=['Sense', 'PhrVbEntry'])
             for b in blocks:
                 head_pv = b.find(['span'], class_=['Head', 'PHRVB', 'LEXUNIT'])
-                pv_name = head_pv.get_text(strip=True) if head_pv else ""
+                pv_name = head_pv.get_text(separator=" ", strip=True) if head_pv else ""
+                
                 defs = b.find_all('span', class_='DEF')
                 if not defs and not pv_name: continue
 
                 sub_list = []
-                # a, b, c bandlarni yig'ish
                 subs = b.find_all('span', class_='Subsense')
                 if subs:
                     for idx, sub in enumerate(subs):
@@ -94,28 +93,28 @@ def scrape_longman_ultimate(word):
                         if not d_text: continue
                         sub_list.append({
                             "letter": chr(97 + idx),
-                            "gram": sub.find('span', class_='GRAM').get_text(strip=True) if sub.find('span', class_='GRAM') else "",
-                            "def": d_text.get_text(strip=True),
-                            "exs": [ex.get_text(strip=True) for ex in sub.find_all('span', class_='EXAMPLE')]
+                            "gram": sub.find('span', class_='GRAM').get_text(separator=" ", strip=True) if sub.find('span', class_='GRAM') else "",
+                            "def": d_text.get_text(separator=" ", strip=True),
+                            "exs": [ex.get_text(separator=" ", strip=True) for ex in sub.find_all('span', class_='EXAMPLE')]
                         })
                 else:
                     for d in defs:
                         gram = b.find('span', class_='GRAM')
                         sub_list.append({
                             "letter": "",
-                            "gram": gram.get_text(strip=True) if gram else "",
+                            "gram": gram.get_text(separator=" ", strip=True) if gram else "",
                             "def": d.get_text(strip=True),
-                            "exs": [ex.get_text(strip=True) for ex in b.find_all('span', class_='EXAMPLE')]
+                            "exs": [ex.get_text(separator=" ", strip=True) for ex in b.find_all('span', class_='EXAMPLE')]
                         })
                 if sub_list or pv_name:
                     merged[pos]["data"].append({
-                        "sign": b.find('span', class_='SIGNPOST').get_text(strip=True).upper() if b.find('span', class_='SIGNPOST') else "",
+                        "sign": b.find('span', class_='SIGNPOST').get_text(separator=" ", strip=True).upper() if b.find('span', class_='SIGNPOST') else "",
                         "lex": pv_name, "subs": sub_list
                     })
         return merged
     except: return None
 
-# --- 3. FORMATLASH VA SEQENTIAL MESSAGING (BO'LIB YUBORISH) ---
+# --- 3. FORMATLASH VA SEQENTIAL MESSAGING (MANTIQIY BO'LISH) ---
 def format_output(pos, content, show_examples, show_translation):
     res = f"📕 <b>{content['word'].upper()}</b> [{pos}]\n"
     if content['pron']: res += f"🗣 /{content['pron']}/\n"
@@ -142,7 +141,7 @@ def format_output(pos, content, show_examples, show_translation):
     return res
 
 async def send_sequential_messages(message, text):
-    """Uzun matnni bo'laklarga bo'lib, ketma-ket yuboradi"""
+    """Xabarni 4096 belgidan oshirmay, mantiqiy joydan bo'lib yuboradi"""
     limit = 4000
     if len(text) <= limit:
         await message.answer(text)
@@ -155,8 +154,7 @@ async def send_sequential_messages(message, text):
                 parts.append(text[:split_at])
                 text = text[split_at:].strip()
             else:
-                parts.append(text)
-                break
+                parts.append(text); break
         for p in parts:
             if p: await message.answer(p)
 
@@ -173,7 +171,7 @@ def register_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def cmd_start(m: types.Message):
         u_data = get_user_data(m.from_user.id)
-        await m.answer(f"Xush kelibsiz! Inglizcha so'z yuboring:", reply_markup=get_main_kb(u_data))
+        await m.answer(f"Xush kelibsiz! So'z yuboring:", reply_markup=get_main_kb(u_data))
 
     @dp.message(F.text == "📜 Tarix")
     async def btn_history(m: types.Message):
@@ -222,8 +220,8 @@ def register_handlers(dp: Dispatcher):
         u_data = get_user_data(call.from_user.id)
         if not data: return await call.answer("Qayta qidiring.")
         
+        # UX: Progress-bar
         await call.message.edit_text("⏳")
-        # Emoji progress-bar
         emojis = ["🔍", "🌐", "✍️", "📄"]
         for em in emojis:
             try: await call.message.edit_text(em)
@@ -255,6 +253,7 @@ def start_bot():
         loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop); loop.run_until_complete(main())
     threading.Thread(target=_run, daemon=True).start()
 
-st.title("📕 Longman Ultimate Pro")
+st.title("📕 Longman Ultimate Edition")
 start_bot()
 st.success("✅ Bot faol!")
+    
