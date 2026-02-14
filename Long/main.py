@@ -197,7 +197,7 @@ def register_handlers(dp: Dispatcher):
         u_data['history'] = u_data['history'][:15]
         save_user_data(m.from_user.id, u_data)
         
-        wait = await m.answer("🔍 Qidirilmoqda...")
+        wait = await m.answer("⌛️")
         data = await asyncio.to_thread(scrape_longman_ultimate, word)
         await wait.delete()
 
@@ -243,3 +243,4 @@ st.title("📕 Longman Ultimate Pro")
 start_bot()
 st.success("✅ Bot faol!")
                 
+
