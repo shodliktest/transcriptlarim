@@ -14,27 +14,21 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# --- 1. KONFIGURATSIYA ---
+# --- 1. CONFIG ---
 class Config:
     ADMIN_ID = 1416457518
     USERS_DB = "user_database.json"
     TZ = pytz.timezone('Asia/Tashkent')
     BOT_TOKEN = st.secrets["BOT_TOKEN"]
 
-# DIQQAT: st.session_state o'rniga oddiy global lug'at ishlatamiz
-# Bu Thread-safe (oqimlar uchun xavfsiz) xotira vazifasini bajaradi
 TEMP_CACHE = {}
 
-def get_now():
-    return datetime.now(Config.TZ).strftime('%Y.%m.%d %H:%M:%S')
-
-# --- 2. MUKAMMAL LONGMAN SCRAPER (TO'LIQ MA'NOLAR) ---
-def scrape_longman_ultra(word):
+# --- 2. PROFESSIONAL LONGMAN SCRAPER ---
+def scrape_longman_pro(word):
     try:
         url = f"https://www.ldoceonline.com/dictionary/{word.lower().strip()}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         res = requests.get(url, headers=headers, timeout=15)
-        
         if res.status_code != 200: return None
 
         soup = BeautifulSoup(res.text, 'lxml')
@@ -50,104 +44,141 @@ def scrape_longman_ultra(word):
             hwd = entry.find('span', class_='HWD').text if entry.find('span', class_='HWD') else word
             pron = entry.find('span', class_='PRON').text if entry.find('span', class_='PRON') else ""
             
+            senses_data = []
             senses = entry.find_all('span', class_='Sense')
-            sense_list = []
             
             for i, sense in enumerate(senses, 1):
-                definition = sense.find('span', class_='DEF')
-                if not definition: continue
+                # 1. SIGNPOST (Ko'k sarlavha: drink/leaves)
+                signpost = sense.find('span', class_='SIGNPOST')
+                sign_text = signpost.text.strip().upper() if signpost else ""
+
+                # 2. LEXUNIT (Qalin ibora: mint/camomile etc tea)
+                lexunit = sense.find('span', class_='LEXUNIT')
+                lex_text = lexunit.text.strip() if lexunit else ""
+
+                # 3. GEO/REGISTER (British English)
+                geo = sense.find('span', class_='GEO')
+                geo_text = geo.text.strip() if geo else ""
+
+                sub_senses = []
+                # 4. SUBSENSES (a, b, c bandlar)
+                subs = sense.find_all('span', class_='Subsense')
                 
-                # Barcha misollarni yig'ish (Hech birini qoldirmay)
-                examples = [ex.text.strip() for ex in sense.find_all('span', class_='EXAMPLE') if ex.text.strip()]
-                
-                sense_list.append({
+                if subs:
+                    for sub_idx, sub in enumerate(subs):
+                        gram = sub.find('span', class_='GRAM')
+                        gram_text = gram.text.strip() if gram else ""
+                        
+                        definition = sub.find('span', class_='DEF')
+                        def_text = definition.text.strip() if definition else ""
+                        
+                        examples = [ex.text.strip() for ex in sub.find_all('span', class_='EXAMPLE')]
+                        
+                        sub_senses.append({
+                            "letter": chr(97 + sub_idx), # a, b, c...
+                            "gram": gram_text,
+                            "def": def_text,
+                            "examples": examples
+                        })
+                else:
+                    # Agar kichik bandlar bo'lmasa, asosiy ma'noni olamiz
+                    gram = sense.find('span', class_='GRAM')
+                    gram_text = gram.text.strip() if gram else ""
+                    definition = sense.find('span', class_='DEF')
+                    def_text = definition.text.strip() if definition else ""
+                    examples = [ex.text.strip() for ex in sense.find_all('span', class_='EXAMPLE')]
+                    
+                    sub_senses.append({
+                        "letter": "", 
+                        "gram": gram_text,
+                        "def": def_text,
+                        "examples": examples
+                    })
+
+                senses_data.append({
                     "id": i,
-                    "def": definition.text.strip(),
-                    "examples": list(dict.fromkeys(examples)) 
+                    "signpost": sign_text,
+                    "lexunit": lex_text,
+                    "geo": geo_text,
+                    "subs": sub_senses
                 })
-            
-            if sense_list:
-                all_data[pos_key] = {
-                    "word": hwd,
-                    "pos_display": pos_text.upper(),
-                    "pron": pron,
-                    "senses": sense_list
-                }
+
+            all_data[pos_key] = {
+                "word": hwd,
+                "pos": pos_text.upper(),
+                "pron": pron,
+                "data": senses_data
+            }
         return all_data
     except: return None
 
-# --- 3. FORMATLASH ---
-def format_full_data(data):
-    text = f"📕 <b>{data['word'].upper()}</b> [{data['pos_display']}]\n"
-    if data['pron']: text += f"🗣 <code>/{data['pron']}/</code>\n"
-    text += "━" * 15 + "\n"
+# --- 3. FORMATLASH (RASMDAGIDEK) ---
+def format_pro_output(data):
+    text = f"📕 <b>{data['word'].upper()}</b> /{data['pron']}/ <i>{data['pos'].lower()}</i>\n"
+    text += "━━━━━━━━━━━━━━━\n\n"
     
-    for s in data['senses']:
-        text += f"<b>{s['id']}.</b> {s['def']}\n"
-        if s['examples']:
-            for ex in s['examples']:
-                text += f"  • <i>{ex}</i>\n"
+    for s in data['data']:
+        # Ma'no raqami va Sarlavha
+        header = f"<b>{s['id']}</b> "
+        if s['signpost']: header += f"<u>{s['signpost']}</u> "
+        if s['lexunit']: header += f"<b>{s['lexunit']}</b> "
+        if s['geo']: header += f"<i>{s['geo']}</i>"
+        text += header + "\n"
+
+        for sub in s['subs']:
+            prefix = f"  <b>{sub['letter']})</b> " if sub['letter'] else "  "
+            gram = f"<code>{sub['gram']}</code> " if sub['gram'] else ""
+            text += f"{prefix}{gram}{sub['def']}\n"
+            
+            for ex in sub['examples']:
+                text += f"    • <i>{ex}</i>\n"
         text += "\n"
     return text
 
-# --- 4. HANDLERLAR ---
+# --- 4. BOT RUNNER VA HANDLERLAR ---
 def register_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def cmd_start(m: types.Message):
-        await m.answer(f"👋 Salom, {m.from_user.first_name}!\nInglizcha so'z yuboring, barcha ma'no va misollarni Longmandan olib beraman.")
+        await m.answer(f"👋 Salom {m.from_user.first_name}!\nInglizcha so'z yuboring, barcha ma'no va bandlarni (a, b, c) Longmandan to'liq olib beraman.")
 
     @dp.message(F.text)
     async def handle_word(m: types.Message):
         if m.text.startswith('/'): return
         word = m.text.strip().lower()
-        
-        wait = await m.answer(f"🔍 <b>{word}</b> qidirilmoqda...")
-        data = await asyncio.to_thread(scrape_longman_ultra, word)
+        wait = await m.answer("🔍 Qidirilmoqda...")
+        data = await asyncio.to_thread(scrape_longman_pro, word)
         await wait.delete()
 
         if not data:
             await m.answer("❌ So'z topilmadi.")
             return
 
-        # MUHIM: st.session_state o'rniga TEMP_CACHE lug'atiga saqlaymiz
         TEMP_CACHE[m.chat.id] = data
-        
         kb = InlineKeyboardBuilder()
-        for pos_key, content in data.items():
-            kb.button(text=content['pos_display'], callback_data=f"p_{pos_key}")
-        
-        if len(data) > 1:
-            kb.button(text="📚 Hammasi (Full)", callback_data="p_all")
-        
+        for pk, content in data.items():
+            kb.button(text=content['pos'], callback_data=f"v_{pk}")
+        if len(data) > 1: kb.button(text="📚 Hammasi", callback_data="v_all")
         kb.adjust(2)
         await m.answer(f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:", reply_markup=kb.as_markup())
 
-    @dp.callback_query(F.data.startswith("p_"))
-    async def process_pos(call: types.CallbackQuery):
+    @dp.callback_query(F.data.startswith("v_"))
+    async def process_view(call: types.CallbackQuery):
         chat_id = call.message.chat.id
-        choice = call.data.replace("p_", "")
+        choice = call.data.replace("v_", "")
         data = TEMP_CACHE.get(chat_id)
-        
-        if not data:
-            await call.answer("Qayta qidiring.", show_alert=True)
-            return
+        if not data: return await call.answer("Qayta qidiring.")
 
-        response = ""
+        res_text = ""
         if choice == "all":
-            for pk in data:
-                response += format_full_data(data[pk]) + "═" * 15 + "\n"
+            for pk in data: res_text += format_pro_output(data[pk]) + "═" * 15 + "\n"
         else:
-            response = format_full_data(data[choice])
+            res_text = format_pro_output(data[choice])
 
-        # Xabarni bo'laklash (Telegram limiti 4096)
-        if len(response) > 4000:
-            for i in range(0, len(response), 4000):
-                await call.message.answer(response[i:i+4000])
-        else:
-            await call.message.answer(response)
+        if len(res_text) > 4000:
+            for i in range(0, len(res_text), 4000): await call.message.answer(res_text[i:i+4000])
+        else: await call.message.answer(res_text)
         await call.answer()
 
-# --- 5. RUNNER ---
 @st.cache_resource
 def start_bot():
     def _run():
@@ -156,21 +187,12 @@ def start_bot():
             dp = Dispatcher()
             register_handlers(dp)
             await bot.delete_webhook(drop_pending_updates=True)
-            try:
-                await dp.start_polling(bot, handle_signals=False)
-            finally:
-                await bot.session.close()
-
+            await dp.start_polling(bot, handle_signals=False)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(main())
+    threading.Thread(target=_run, daemon=True).start()
 
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    return thread
-
-# --- 6. STREAMLIT UI ---
-st.set_page_config(page_title="Longman Ultra", layout="centered")
-st.title("📕 Longman Ultra Scraper")
+st.title("📕 Longman Pro Scraper")
 start_bot()
-st.success("Bot Online! Telegramda so'z yuborib ko'ring.")
+st.success("Bot Online! Rasmdagi kabi barcha bandlarni chiqaradi.")
