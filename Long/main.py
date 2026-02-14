@@ -13,7 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 # --- 1. KONFIGURATSIYA ---
-st.set_page_config(page_title="Longman Ultimate Pro", layout="centered")
+st.set_page_config(page_title="Longman Ultimate Edition", layout="centered")
 
 class Config:
     try:
@@ -21,7 +21,7 @@ class Config:
     except:
         st.error("❌ Secrets bo'limida BOT_TOKEN kiritilmagan!")
         st.stop()
-    DB_FILE = "user_settings_v11.json"
+    DB_FILE = "user_settings_v13.json"
 
 def get_user_data(user_id):
     if not os.path.exists(Config.DB_FILE):
@@ -49,18 +49,13 @@ def translate_to_uz(text):
         return res[0][0][0]
     except: return "⚠️ Tarjima xatoligi."
 
-# --- MUHIM: SO'ZLARNI AJRATIB OLISH FUNKSIYASI ---
 def clean_text(element):
-    """HTML teglar orasidagi so'zlar yopishib qolishini oldini oladi"""
     if not element: return ""
-    # Separator sifatida bo'sh joy qo'shish orqali barcha qismlarni ajratamiz
-    raw_text = element.get_text(separator=" ", strip=True)
-    # Ortiqcha probellarni (tab, yangi qator) bitta bo'sh joyga aylantiramiz
-    return " ".join(raw_text.split())
+    return " ".join(element.get_text(separator=" ", strip=True).split())
 
 TEMP_CACHE = {}
 
-# --- 2. SKRAPER (TO'LIQ MA'LUMOTLAR) ---
+# --- 2. PROFESSIONAL SKRAPER (PRON VA PHRASAL VERBS TUZATILGAN) ---
 def scrape_longman_ultimate(word):
     try:
         url = f"https://www.ldoceonline.com/dictionary/{word.lower().strip().replace(' ', '-')}"
@@ -73,16 +68,29 @@ def scrape_longman_ultimate(word):
         if not entries: return None
 
         merged = {}
+        # Umumiy talaffuzni saqlash uchun
+        global_pron = ""
+
         for entry in entries:
+            # 1. Talaffuzni qidirish (agar bo'lsa yangilaymiz)
+            pron_tag = entry.find('span', class_='PRON')
+            if pron_tag:
+                global_pron = clean_text(pron_tag)
+
+            # 2. Turkumni aniqlash
             pos_tag = entry.find('span', class_='POS')
             pos = clean_text(pos_tag).upper() if pos_tag else "WORD"
-            if "PhrVbEntry" in entry.get('class', []): pos = "PHRASAL VERB"
+            
+            # 3. Phrasal Verb ekanini tekshirish
+            is_phrvb = "PhrVbEntry" in entry.get('class', []) or entry.find('span', class_='PHRVB')
+            if is_phrvb: pos = "PHRASAL VERB"
             
             hwd = clean_text(entry.find('span', class_='HWD')) or word
-            pron = clean_text(entry.find('span', class_='PRON'))
 
             if pos not in merged:
-                merged[pos] = {"word": hwd, "pron": pron, "data": []}
+                merged[pos] = {"word": hwd, "pron": global_pron, "data": []}
+            elif not merged[pos]["pron"] and global_pron:
+                merged[pos]["pron"] = global_pron
 
             blocks = entry.find_all(['span'], class_=['Sense', 'PhrVbEntry'])
             for b in blocks:
@@ -121,10 +129,12 @@ def scrape_longman_ultimate(word):
         return merged
     except: return None
 
-# --- 3. FORMATLASH VA XABARNI BO'LISH ---
+# --- 3. FORMATLASH VA BO'LISH ---
 def format_output(pos, content, show_examples, show_translation):
     res = f"📕 <b>{content['word'].upper()}</b> [{pos}]\n"
-    if content['pron']: res += f"🗣 /{content['pron']}/\n"
+    # Har doim PRON bo'lsa chiqaramiz
+    if content['pron']:
+        res += f"🗣 /{content['pron']}/\n"
     res += "━━━━━━━━━━━━━━━\n\n"
     
     cnt = 1
@@ -134,9 +144,7 @@ def format_output(pos, content, show_examples, show_translation):
         lex = f"<b>{s['lex']}</b> " if s['lex'] else ""
         
         for i, sub in enumerate(s['subs']):
-            # Grammatika ichida qavslar bo'lsa ularni takrorlamaymiz
-            gram_val = sub['gram'].strip("[]")
-            gram = f"<code>[{gram_val}]</code> " if gram_val else ""
+            gram = f"<code>[{sub['gram'].strip('[]')}]</code> " if sub['gram'] else ""
             letter = f"<b>{sub['letter']})</b> " if sub['letter'] else ""
             copy_def = f"<b><code>{sub['def']}</code></b>"
             
@@ -144,35 +152,24 @@ def format_output(pos, content, show_examples, show_translation):
             else: res += f"  {letter}{gram}{copy_def}\n"
             
             if show_translation:
-                tr = translate_to_uz(sub['def'])
-                res += f"🇺🇿 <i>{tr}</i>\n"
+                res += f"🇺🇿 <i>{translate_to_uz(sub['def'])}</i>\n"
             
             if show_examples:
                 for ex in sub['exs']: res += f"    • <i>{ex}</i>\n"
-        
         if not s['subs'] and lex: res += f"{line_head}{sign}{lex}\n"
         res += "\n"
         cnt += 1
     return res
 
 async def send_sequential_messages(message, text):
-    """Xabarni 4096 belgidan oshirmay, mantiqiy joydan bo'lib yuboradi"""
     limit = 4000
-    if len(text) <= limit:
-        await message.answer(text)
+    if len(text) <= limit: await message.answer(text)
     else:
-        parts = []
         while len(text) > 0:
-            if len(text) > limit:
-                # Yangi qatordan kesish mantiqiyroq
-                split_at = text.rfind('\n', 0, limit)
-                if split_at == -1: split_at = limit
-                parts.append(text[:split_at])
-                text = text[split_at:].strip()
-            else:
-                parts.append(text); break
-        for p in parts:
-            if p: await message.answer(p)
+            split_at = text.rfind('\n', 0, limit) if len(text) > limit else len(text)
+            if split_at == -1: split_at = limit
+            await message.answer(text[:split_at])
+            text = text[split_at:].strip()
 
 # --- 4. HANDLERLAR ---
 def register_handlers(dp: Dispatcher):
@@ -186,16 +183,14 @@ def register_handlers(dp: Dispatcher):
 
     @dp.message(Command("start"))
     async def cmd_start(m: types.Message):
-        u_data = get_user_data(m.from_user.id)
-        await m.answer(f"Salom! Inglizcha so'z yuboring:", reply_markup=get_main_kb(u_data))
+        await m.answer("Salom! So'z yuboring:", reply_markup=get_main_kb(get_user_data(m.from_user.id)))
 
     @dp.message(F.text == "📜 Tarix")
     async def btn_history(m: types.Message):
         u_data = get_user_data(m.from_user.id)
-        history = u_data.get('history', [])
-        if not history: return await m.answer("📭 Tarix hali bo'sh.")
+        if not u_data['history']: return await m.answer("Tarix bo'sh.")
         msg = "📜 <b>Oxirgi qidiruvlar:</b>\n\n"
-        for i, word in enumerate(history, 1): msg += f"{i}. <code>{word}</code>\n"
+        for i, word in enumerate(u_data['history'], 1): msg += f"{i}. <code>{word}</code>\n"
         await m.answer(msg)
 
     @dp.message(F.text.in_(["🚫 Misollarsiz", "📝 Misollar bilan", "🔤 Tarjimasiz", "🌐 Tarjima bilan"]))
@@ -215,7 +210,7 @@ def register_handlers(dp: Dispatcher):
         u_data['history'].insert(0, word); u_data['history'] = u_data['history'][:15]
         save_user_data(m.from_user.id, u_data)
         
-        wait = await m.answer("⏳") 
+        wait = await m.answer("⏳")
         data = await asyncio.to_thread(scrape_longman_ultimate, word)
         await wait.delete()
         if not data: return await m.answer("❌ So'z topilmadi.")
@@ -225,41 +220,32 @@ def register_handlers(dp: Dispatcher):
         for pos in data.keys(): kb.button(text=pos, callback_data=f"v_{pos}")
         if len(data) > 1: kb.button(text="📚 All", callback_data="v_all")
         kb.adjust(2)
-        
-        # JAVOBNI TO'LIQ VA ANIQ QILIB QO'YAMIZ
-        instructions = (
-            f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:\n\n"
-            f"<i>Ma'nolarni ko'rish uchun pastdagi turkumlardan (Noun, Verb, Adj) birini bosing.</i>"
-        )
-        await m.answer(instructions, reply_markup=kb.as_markup())
+        await m.answer(f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:", reply_markup=kb.as_markup())
 
     @dp.callback_query(F.data.startswith("v_"))
     async def process_view(call: types.CallbackQuery):
+        await call.answer() # Timeout oldini olish uchun
         choice = call.data.replace("v_", "")
         data = TEMP_CACHE.get(call.message.chat.id)
         u_data = get_user_data(call.from_user.id)
-        if not data: return await call.answer("Qayta qidiring.")
+        if not data: return await call.message.answer("Qayta qidiring.")
         
-        await call.message.edit_text("⏳")
-        # Emoji progress-bar (Har xil emojilar navbat bilan)
-        progress_emojis = ["🔍 Qidirilmoqda...", "🌐 Tarjima qilinmoqda...", "✍️ Tayyorlanmoqda...", "📄 Bo'lim yuklanmoqda..."]
-        for msg in progress_emojis:
-            try: await call.message.edit_text(msg)
+        prog = await call.message.edit_text("🔍")
+        for em in ["🌐", "✍️", "📄"]:
+            await asyncio.sleep(0.3)
+            try: await prog.edit_text(em)
             except: pass
-            await asyncio.sleep(0.4)
         
         if choice == "all":
             full_text = ""
             for pos, content in data.items():
-                full_text += format_output(pos, content, u_data['show_examples'], u_data['show_translation']) + "═" * 15 + "\n"
+                full_text += format_output(pos, content, u_data['show_examples'], u_data['show_translation']) + "═"*15 + "\n"
             await send_sequential_messages(call.message, full_text)
         else:
-            final_text = format_output(choice, data[choice], u_data['show_examples'], u_data['show_translation'])
-            await send_sequential_messages(call.message, final_text)
+            await send_sequential_messages(call.message, format_output(choice, data[choice], u_data['show_examples'], u_data['show_translation']))
         
-        try: await call.message.delete()
+        try: await prog.delete()
         except: pass
-        await call.answer()
 
 # --- 5. RUNNER ---
 @st.cache_resource
@@ -267,13 +253,19 @@ def start_bot():
     def _run():
         async def main():
             bot = Bot(token=Config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-            dp = Dispatcher(); register_handlers(dp)
+            dp = Dispatcher()
+            register_handlers(dp)
             await bot.delete_webhook(drop_pending_updates=True)
             await dp.start_polling(bot, handle_signals=False)
-        loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop); loop.run_until_complete(main())
-    threading.Thread(target=_run, daemon=True).start()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
+    
+    if "bot_thread" not in st.session_state:
+        st.session_state.bot_thread = threading.Thread(target=_run, daemon=True)
+        st.session_state.bot_thread.start()
 
-st.title("📕 Longman Ultimate Edition")
+st.title("📕 Longman Ultimate Pro")
 start_bot()
-st.success("✅ Bot faol!")
+st.success("✅ Bot Online!")
                 
