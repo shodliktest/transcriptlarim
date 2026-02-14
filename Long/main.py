@@ -14,11 +14,11 @@ from aiogram.enums import ParseMode
 class Config:
     BOT_TOKEN = st.secrets["BOT_TOKEN"]
 
-# Thread ichida st.session_state ishlamasligi uchun global lug'at
+# Threadlar ichida xavfsiz ishlash uchun global xotira
 TEMP_CACHE = {}
 
-# --- 2. PROFESSIONAL SKRAPER (BO'SH JOYLARSIZ) ---
-def scrape_longman_perfect(word):
+# --- 2. ULTIMATE LONGMAN SCRAPER ---
+def scrape_longman_ultimate(word):
     try:
         url = f"https://www.ldoceonline.com/dictionary/{word.lower().strip()}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -31,32 +31,32 @@ def scrape_longman_perfect(word):
 
         all_data = {}
         for entry_idx, entry in enumerate(entries):
-            # Asosiy ma'lumotlar
-            hwd_tag = entry.find('span', class_='HWD')
-            hwd = hwd_tag.text if hwd_tag else word
+            # Asosiy sarlavha va talaffuz
+            hwd = entry.find('span', class_='HWD').text if entry.find('span', class_='HWD') else word
             pos_tag = entry.find('span', class_='POS')
             pos_text = pos_tag.text.strip().lower() if pos_tag else "word"
-            pron_tag = entry.find('span', class_='PRON')
-            pron = pron_tag.text if pron_tag else ""
+            pron = entry.find('span', class_='PRON').text if entry.find('span', class_='PRON') else ""
             
             senses_data = []
-            # Barcha bloklarni (Sense va Phrasal Verbs) qamrab olish
-            blocks = entry.find_all(['span'], class_=['Sense', 'PhrVbEntry'])
+            # MUHIM: Endi nafaqat 'Sense', balki barcha turdagi bloklarni qidiramiz
+            blocks = entry.find_all(['span'], class_=['Sense', 'PhrVbEntry', 'ColloEx', 'GramEx'])
             
             valid_counter = 1
-            for b in blocks:
-                definition = b.find('span', class_='DEF')
-                lexunit = b.find('span', class_='LEXUNIT')
-                head = b.find('span', class_='Head') # Phrasal verb boshligi
+            for block in blocks:
+                # Ta'rif, Iboralar (Lexunit) va sarlavhalarni aniqlash
+                definition = block.find('span', class_='DEF')
+                lexunit = block.find('span', class_='LEXUNIT')
+                head = block.find('span', class_='Head') # Phrasal verb sarlavhasi
                 
-                # Mazmuni bo'lmagan bloklarni tashlab ketamiz
+                # Agar hech qanday mazmun bo'lmasa, tashlab ketamiz
                 if not definition and not lexunit and not head: continue
 
-                signpost = b.find('span', class_='SIGNPOST')
-                geo = b.find('span', class_='GEO')
+                signpost = block.find('span', class_='SIGNPOST')
+                geo = block.find('span', class_='GEO')
                 
                 sub_senses = []
-                subs = b.find_all('span', class_='Subsense')
+                # a, b, c bandlarni (Subsense) qidirish
+                subs = block.find_all('span', class_='Subsense')
                 
                 if subs:
                     for sub_idx, sub in enumerate(subs):
@@ -69,12 +69,12 @@ def scrape_longman_perfect(word):
                             "examples": [ex.text.strip() for ex in sub.find_all('span', class_='EXAMPLE')]
                         })
                 else:
-                    gram = b.find('span', class_='GRAM')
+                    # Kichik bandlar bo'lmasa, asosiy blok ma'lumoti
                     sub_senses.append({
                         "letter": "",
-                        "gram": gram.text.strip() if gram else "",
+                        "gram": block.find('span', class_='GRAM').text.strip() if block.find('span', class_='GRAM') else "",
                         "def": definition.text.strip() if definition else "",
-                        "examples": [ex.text.strip() for ex in b.find_all('span', class_='EXAMPLE')]
+                        "examples": [ex.text.strip() for ex in block.find_all('span', class_='EXAMPLE')]
                     })
 
                 senses_data.append({
@@ -87,13 +87,14 @@ def scrape_longman_perfect(word):
                 valid_counter += 1
 
             if senses_data:
-                pos_key = f"{pos_text}_{entry_idx}"
-                all_data[pos_key] = {"word": hwd, "pos": pos_text.upper(), "pron": pron, "data": senses_data}
+                all_data[f"{pos_text}_{entry_idx}"] = {
+                    "word": hwd, "pos": pos_text.upper(), "pron": pron, "data": senses_data
+                }
         return all_data
     except: return None
 
-# --- 3. FORMATLASH ---
-def format_pro(data):
+# --- 3. FORMATLASH (LONGMAN BILAN BIR XIL) ---
+def format_ultra(data):
     text = f"📕 <b>{data['word'].upper()}</b> /{data['pron']}/ <i>{data['pos'].lower()}</i>\n"
     text += "━━━━━━━━━━━━━━━\n\n"
     
@@ -113,44 +114,41 @@ def format_pro(data):
         text += "\n"
     return text
 
-# --- 4. HANDLERLAR ---
+# --- 4. BOT MANTIQI ---
 def register_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def cmd_start(m: types.Message):
-        await m.answer(f"👋 Salom {m.from_user.first_name}!\n\nInglizcha so'z yuboring, barcha ma'no va misollarni Longmandan to'liq olib beraman.")
+        await m.answer("👋 Salom! Inglizcha so'z yuboring, Longmandagi barcha bandlarni (a, b, c) va phrasal verblarni to'liq olib beraman.")
 
     @dp.message(F.text)
     async def handle_word(m: types.Message):
         if m.text.startswith('/'): return
         word = m.text.strip().lower()
         wait = await m.answer(f"🔍 <b>{word}</b> tahlil qilinmoqda...")
-        data = await asyncio.to_thread(scrape_perfect, word) # Pastdagi nomga moslash uchun
-        if not data: data = await asyncio.to_thread(scrape_longman_perfect, word)
+        data = await asyncio.to_thread(scrape_longman_ultimate, word)
         await wait.delete()
 
-        if not data:
-            return await m.answer("❌ Kechirasiz, so'z topilmadi.")
+        if not data: return await m.answer("❌ So'z topilmadi.")
 
         TEMP_CACHE[m.chat.id] = data
         kb = InlineKeyboardBuilder()
         for pk, content in data.items():
-            kb.button(text=content['pos'], callback_data=f"p_{pk}")
-        if len(data) > 1: kb.button(text="📚 Hammasi", callback_data="p_all")
+            kb.button(text=content['pos'], callback_data=f"z_{pk}")
+        if len(data) > 1: kb.button(text="📚 Hammasi", callback_data="z_all")
         kb.adjust(2)
         await m.answer(f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:", reply_markup=kb.as_markup())
 
-    @dp.callback_query(F.data.startswith("p_"))
-    async def process_view(call: types.CallbackQuery):
-        chat_id = call.message.chat.id
-        choice = call.data.replace("p_", "")
-        data = TEMP_CACHE.get(chat_id)
+    @dp.callback_query(F.data.startswith("z_"))
+    async def process_choice(call: types.CallbackQuery):
+        choice = call.data.replace("z_", "")
+        data = TEMP_CACHE.get(call.message.chat.id)
         if not data: return await call.answer("Qayta qidiring.")
 
         res = ""
         if choice == "all":
-            for pk in data: res += format_pro(data[pk]) + "═" * 15 + "\n"
+            for pk in data: res += format_ultra(data[pk]) + "═" * 15 + "\n"
         else:
-            res = format_pro(data[choice])
+            res = format_ultra(data[choice])
 
         if len(res) > 4000:
             for i in range(0, len(res), 4000): await call.message.answer(res[i:i+4000])
@@ -159,7 +157,7 @@ def register_handlers(dp: Dispatcher):
 
 # --- 5. RUNNER ---
 @st.cache_resource
-def start_bot_process():
+def start_bot():
     def _run():
         async def main():
             bot = Bot(token=Config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -172,9 +170,7 @@ def start_bot_process():
         loop.run_until_complete(main())
     threading.Thread(target=_run, daemon=True).start()
 
-# --- 6. STREAMLIT ---
-st.set_page_config(page_title="Longman Pro", layout="centered")
 st.title("📕 Longman Ultimate Pro")
-start_bot_process()
-st.success("Bot Online! Endi barcha bandlar to'liq va tartibli chiqadi.")
-    
+start_bot()
+st.success("Bot Online! Endi barcha bandlar va phrasal verblar to'liq chiqadi.")
+        
