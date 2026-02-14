@@ -220,7 +220,8 @@ def register_handlers(dp: Dispatcher):
         for pos in data.keys(): kb.button(text=pos, callback_data=f"v_{pos}")
         if len(data) > 1: kb.button(text="📚 All", callback_data="v_all")
         kb.adjust(2)
-        await m.answer(f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:", reply_markup=kb.as_markup())
+        await m.answer(      f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:\n\n"
+            f"<i>Ma'nolarni ko'rish uchun pastdagi turkumlardan (Noun, Verb, Adj) birini bosing.</i>", reply_markup=kb.as_markup())
 
     @dp.callback_query(F.data.startswith("v_"))
     async def process_view(call: types.CallbackQuery):
@@ -269,4 +270,5 @@ st.title("📕 Longman Ultimate Pro")
 start_bot()
 st.success("✅ Bot Online!")
                 
+
 
