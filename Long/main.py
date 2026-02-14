@@ -37,10 +37,9 @@ def save_to_history(user_id, word):
     uid = str(user_id)
     if uid not in data: data[uid] = []
     
-    # So'zni ro'yxat boshiga qo'shish va takrorlanishni o'chirish
     if word in data[uid]: data[uid].remove(word)
     data[uid].insert(0, word)
-    data[uid] = data[uid][:15] # Faqat oxirgi 15 ta so'z
+    data[uid] = data[uid][:15] # Oxirgi 15 ta so'z
     
     with open(db_file, "w") as f:
         json.dump(data, f, indent=4)
@@ -48,7 +47,8 @@ def save_to_history(user_id, word):
 def get_history(user_id):
     if not os.path.exists(Config.HISTORY_DB): return []
     with open(Config.HISTORY_DB, "r") as f:
-        data = json.load(f)
+        try: data = json.load(f)
+        except: return []
     return data.get(str(user_id), [])
 
 # --- 3. MERGED SCRAPER ---
@@ -113,7 +113,7 @@ def scrape_longman_merged(word):
         return merged_data
     except: return None
 
-# --- 4. FORMATTING (CLICK-TO-COPY) ---
+# --- 4. FORMATTING (FIXED NAMEERROR) ---
 def format_merged_style(pos, content):
     res = f"📕 <b>{content['word'].upper()}</b> [{pos}]\n"
     if content['pron']: res += f"🗣 /{content['pron']}/\n"
@@ -130,14 +130,17 @@ def format_merged_style(pos, content):
                 gram = f"[{sub['gram']}] " if sub['gram'] else ""
                 letter = f"<b>{sub['letter']})</b> " if sub['letter'] else ""
                 
-                # Ta'rif qismini nusxalanadigan qilish (code tegi)
+                # NUSXALANADIGAN QISM (<code> tegi ichida)
                 copyable_def = f"<code>{sub['def']}</code>"
                 
                 if i == 0:
-                    res += f"{line_head}{sign}{lex}{letter}{gram}{copyable_part}\n"
+                    # Raqam bilan bir qatorda
+                    res += f"{line_head}{sign}{lex}{letter}{gram}{copyable_def}\n"
                 else:
+                    # Bandlar yangi qatorda
                     res += f"  {letter}{gram}{copyable_def}\n"
                 
+                # MISOLLAR (Oddiy matn - nusxalanmaydi)
                 for ex in sub['examples']:
                     res += f"    • <i>{ex}</i>\n"
             res += "\n"
@@ -150,7 +153,7 @@ def register_handlers(dp: Dispatcher):
     async def cmd_start(m: types.Message):
         kb = ReplyKeyboardBuilder()
         kb.button(text="📜 Tarix")
-        await m.answer(f"Salom {m.from_user.first_name}! So'z yuboring:", 
+        await m.answer(f"Salom {m.from_user.first_name}! Inglizcha so'z yuboring:", 
                        reply_markup=kb.as_markup(resize_keyboard=True))
 
     @dp.message(F.text == "📜 Tarix")
@@ -161,7 +164,7 @@ def register_handlers(dp: Dispatcher):
         
         kb = InlineKeyboardBuilder()
         for word in history:
-            kb.button(text=word, callback_data=f"search_{word}")
+            kb.button(text=word, callback_data=f"h_{word}")
         kb.adjust(2)
         await m.answer("Oxirgi qidiruvlaringiz:", reply_markup=kb.as_markup())
 
@@ -169,8 +172,9 @@ def register_handlers(dp: Dispatcher):
     async def handle_word(m: types.Message):
         if m.text.startswith('/'): return
         word = m.text.strip().lower()
-        save_to_history(m.from_user.id, word)
+        if len(word.split()) > 1: return await m.answer("Faqat bitta so'z yuboring.")
         
+        save_to_history(m.from_user.id, word)
         wait = await m.answer("🔍 Qidirilmoqda...")
         data = await asyncio.to_thread(scrape_longman_merged, word)
         await wait.delete()
@@ -184,12 +188,20 @@ def register_handlers(dp: Dispatcher):
         kb.adjust(2)
         await m.answer(f"📦 <b>{word.upper()}</b> uchun bo'limni tanlang:", reply_markup=kb.as_markup())
 
-    @dp.callback_query(F.data.startswith("search_"))
+    @dp.callback_query(F.data.startswith("h_"))
     async def history_search(call: types.CallbackQuery):
-        word = call.data.replace("search_", "")
-        # Bu yerda handle_word mantiqini takrorlash yoki chaqirish mumkin
-        await call.message.answer(f"Qayta qidirilmoqda: {word}")
-        # (Soddalik uchun bu yerda yangi xabar yuborish mantiqi)
+        word = call.data.replace("h_", "")
+        # Tarixdan bosilganda avtomatik qidirish
+        wait = await call.message.answer(f"🔍 <b>{word}</b> qayta qidirilmoqda...")
+        data = await asyncio.to_thread(scrape_longman_merged, word)
+        await wait.delete()
+        if not data: return await call.message.answer("So'z topilmadi.")
+        TEMP_CACHE[call.message.chat.id] = data
+        kb = InlineKeyboardBuilder()
+        for pos in data.keys(): kb.button(text=pos, callback_data=f"v_{pos}")
+        if len(data) > 1: kb.button(text="📚 All", callback_data="v_all")
+        kb.adjust(2)
+        await call.message.answer(f"📦 <b>{word.upper()}</b> bo'limini tanlang:", reply_markup=kb.as_markup())
 
     @dp.callback_query(F.data.startswith("v_"))
     async def process_view(call: types.CallbackQuery):
@@ -223,7 +235,6 @@ def start_bot_app():
         loop.run_until_complete(main())
     threading.Thread(target=_run, daemon=True).start()
 
-st.title("📕 Longman AI Dictionary")
+st.title("📕 Longman AI Pro")
 start_bot_app()
 st.success("✅ Bot Online!")
-                
