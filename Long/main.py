@@ -232,7 +232,7 @@ def register_handlers(dp: Dispatcher):
         if not data: return await call.message.answer("Qayta qidiring.")
         
         prog = await call.message.edit_text("🔍")
-        for em in ["🌐", "✍️", "⌛"]:
+        for em in ["🎗", "✍️", "⌛"]:
             await asyncio.sleep(0.3)
             try: await prog.edit_text(em)
             except: pass
@@ -270,5 +270,6 @@ st.title("📕 Longman Ultimate Pro")
 start_bot()
 st.success("✅ Bot Online!")
                 
+
 
 
